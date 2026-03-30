@@ -44,8 +44,13 @@ def fit_histogram_peak(x, counts):
     return popt, pcov, perr
 
 
+def clean_numeric_column(dat, col):
+    x = np.array(dat[col], dtype=float)
+    return x[np.isfinite(x)]
+
+
 def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref):
-    nu_lab = np.asarray(dat[wn_col], dtype=float) * C * 100.0 * 1e-9
+    nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
     nu_rest = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
     x = nu_rest - nu0_ref
 
@@ -75,8 +80,8 @@ def plot_two_isotopes_fit(
 
     Returns fit centers and uncertainties for each isotope and the propagated isotope shift.
     """
-    nu1_lab = np.asarray(cut_file_1[wn_col], dtype=float) * C * 100.0 * 1e-9
-    nu2_lab = np.asarray(cut_file_2[wn_col], dtype=float) * C * 100.0 * 1e-9
+    nu1_lab = clean_numeric_column(cut_file_1, wn_col) * C * 100.0 * 1e-9
+    nu2_lab = clean_numeric_column(cut_file_2, wn_col) * C * 100.0 * 1e-9
 
     nu1 = doppler_correct_ghz(nu1_lab, mass1_u, beam_voltage_V, charge_e, geometry)
     nu2 = doppler_correct_ghz(nu2_lab, mass2_u, beam_voltage_V, charge_e, geometry)
@@ -90,7 +95,7 @@ def plot_two_isotopes_fit(
         cut_file_2, mass2_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0
     )
 
-    isotope_shift = center2 - center1
+    isotope_shift = float(center2) - float(center1)
     isotope_shift_fit_unc = np.sqrt(dcenter1_fit**2 + dcenter2_fit**2)
 
     dcenter1_V = 0.0
@@ -104,7 +109,7 @@ def plot_two_isotopes_fit(
         c1_minus, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_1, mass1_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
         )
-        dcenter1_V = abs(c1_plus - c1_minus) / 2.0
+        dcenter1_V = abs(float(c1_plus) - float(c1_minus)) / 2.0
 
         c2_plus, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_2, mass2_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
@@ -112,10 +117,10 @@ def plot_two_isotopes_fit(
         c2_minus, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_2, mass2_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
         )
-        dcenter2_V = abs(c2_plus - c2_minus) / 2.0
+        dcenter2_V = abs(float(c2_plus) - float(c2_minus)) / 2.0
 
-        shift_plus = c2_plus - c1_plus
-        shift_minus = c2_minus - c1_minus
+        shift_plus = float(c2_plus) - float(c1_plus)
+        shift_minus = float(c2_minus) - float(c1_minus)
         isotope_shift_V_unc = abs(shift_plus - shift_minus) / 2.0
 
     dcenter1_total = np.sqrt(dcenter1_fit**2 + dcenter1_V**2)
@@ -173,18 +178,18 @@ def plot_two_isotopes_fit(
 
     return {
         "nu0_GHz": nu0,
-        "center1_GHz": center1,
-        "center1_fit_unc_GHz": dcenter1_fit,
-        "center1_voltage_unc_GHz": dcenter1_V,
-        "center1_total_unc_GHz": dcenter1_total,
-        "center2_GHz": center2,
-        "center2_fit_unc_GHz": dcenter2_fit,
-        "center2_voltage_unc_GHz": dcenter2_V,
-        "center2_total_unc_GHz": dcenter2_total,
-        "isotope_shift_GHz": isotope_shift,
-        "isotope_shift_fit_unc_GHz": isotope_shift_fit_unc,
-        "isotope_shift_voltage_unc_GHz": isotope_shift_V_unc,
-        "isotope_shift_total_unc_GHz": isotope_shift_total_unc,
+        "center1_GHz": float(center1),
+        "center1_fit_unc_GHz": float(dcenter1_fit),
+        "center1_voltage_unc_GHz": float(dcenter1_V),
+        "center1_total_unc_GHz": float(dcenter1_total),
+        "center2_GHz": float(center2),
+        "center2_fit_unc_GHz": float(dcenter2_fit),
+        "center2_voltage_unc_GHz": float(dcenter2_V),
+        "center2_total_unc_GHz": float(dcenter2_total),
+        "isotope_shift_GHz": float(isotope_shift),
+        "isotope_shift_fit_unc_GHz": float(isotope_shift_fit_unc),
+        "isotope_shift_voltage_unc_GHz": float(isotope_shift_V_unc),
+        "isotope_shift_total_unc_GHz": float(isotope_shift_total_unc),
     }
 
 
