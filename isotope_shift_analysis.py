@@ -50,22 +50,38 @@ def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, 
     return np.asarray(nu_lab_ghz, dtype=float) * factor
 
 
-def fit_histogram_peak(x, counts):
+def fit_histogram_peak(x, counts, fit_half_width_bins=8):
     i_max = np.argmax(counts)
+    i0 = max(0, i_max - fit_half_width_bins)
+    i1 = min(len(x), i_max + fit_half_width_bins + 1)
+
+    x_fit = np.asarray(x[i0:i1], dtype=float)
+    y_fit = np.asarray(counts[i0:i1], dtype=float)
+
     center_guess = x[i_max]
-    amplitude_guess = counts[i_max] - np.min(counts)
-    sigma_guess = max((x.max() - x.min()) / 20.0, 1e-6)
-    background_guess = np.min(counts)
-    yerr = np.sqrt(np.asarray(counts, dtype=float))
+    amplitude_guess = max(counts[i_max] - np.min(y_fit), 1.0)
+    sigma_guess = max((x_fit.max() - x_fit.min()) / 6.0, 1e-3)
+    background_guess = max(np.min(y_fit), 0.0)
+    yerr = np.sqrt(y_fit)
     yerr[yerr <= 0] = 1.0
 
     model = GaussianModel(amplitude_guess, center_guess, sigma_guess, background_guess)
-    source = satlas2.Source(x, counts, yerr=yerr, name="HistogramData")
+    model.params["center"].min = x_fit.min()
+    model.params["center"].max = x_fit.max()
+    if len(x_fit) > 1:
+        dx = abs(x_fit[1] - x_fit[0])
+    else:
+        dx = 1e-3
+    model.params["sigma"].min = max(dx / 2.0, 1e-3)
+    model.params["sigma"].max = max(x_fit.max() - x_fit.min(), 1e-2)
+    model.params["background"].min = 0.0
+
+    source = satlas2.Source(x_fit, y_fit, yerr=yerr, name="HistogramData")
     source.addModel(model)
 
     fitter = satlas2.Fitter()
     fitter.addSource(source)
-    fitter.fit(method="slsqp")
+    fitter.fit(method="leastsq")
 
     params = model.params
     popt = np.array(
@@ -86,7 +102,7 @@ def fit_histogram_peak(x, counts):
         ],
         dtype=float,
     )
-    return popt, None, perr
+    return popt, None, perr, x_fit
 
 
 def clean_numeric_column(dat, col):
@@ -102,8 +118,8 @@ def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e
     counts, edges = np.histogram(x, bins=bins)
     centers = 0.5 * (edges[:-1] + edges[1:])
 
-    popt, pcov, perr = fit_histogram_peak(centers, counts)
-    return popt[1], perr[1], x, counts, centers, popt
+    popt, pcov, perr, x_fit = fit_histogram_peak(centers, counts)
+    return popt[1], perr[1], x, counts, centers, popt, x_fit
 
 
 def plot_two_isotopes_fit(
@@ -133,10 +149,10 @@ def plot_two_isotopes_fit(
 
     nu0 = 0.5 * (np.median(nu1) + np.median(nu2))
 
-    center1, dcenter1_fit, x1, counts1, centers1, p1 = _fit_center_from_voltage(
+    center1, dcenter1_fit, x1, counts1, centers1, p1, xfit_window1 = _fit_center_from_voltage(
         cut_file_1, mass1_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0
     )
-    center2, dcenter2_fit, x2, counts2, centers2, p2 = _fit_center_from_voltage(
+    center2, dcenter2_fit, x2, counts2, centers2, p2, xfit_window2 = _fit_center_from_voltage(
         cut_file_2, mass2_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0
     )
 
@@ -190,6 +206,7 @@ def plot_two_isotopes_fit(
     axes[0].axvline(0.0, color="k", linestyle=":", label=r"$\nu_0$")
     axes[0].set_ylabel("Counts", fontweight="bold")
     axes[0].set_title(label1, fontweight="bold")
+    axes[0].set_xlim(xfit_window1.min() - 1.0, xfit_window1.max() + 1.0)
     axes[0].legend()
 
     axes[1].step(centers2, counts2, where="mid", color="C1", alpha=0.75, label=label2)
@@ -204,6 +221,7 @@ def plot_two_isotopes_fit(
     axes[1].set_ylabel("Counts", fontweight="bold")
     axes[1].set_xlabel(r"Corrected frequency relative to $\nu_0$ (GHz)", fontweight="bold")
     axes[1].set_title(label2, fontweight="bold")
+    axes[1].set_xlim(xfit_window2.min() - 1.0, xfit_window2.max() + 1.0)
     axes[1].legend()
 
     fig.suptitle("Doppler-Corrected Isotope Comparison", fontweight="bold", fontsize="x-large")
