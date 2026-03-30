@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import satlas2
+from scipy.ndimage import gaussian_filter1d
 
 
 C = 299792458.0
@@ -49,16 +50,20 @@ def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, 
     return np.asarray(nu_lab_ghz, dtype=float) * factor
 
 
-def fit_histogram_peak(x, counts, fit_half_width_bins=8):
-    i_max = np.argmax(counts)
+def fit_histogram_peak(x, counts, fit_half_width_bins=10, smooth_sigma_bins=2):
+    counts = np.asarray(counts, dtype=float)
+    x = np.asarray(x, dtype=float)
+
+    smooth_counts = gaussian_filter1d(counts, smooth_sigma_bins)
+    i_max = np.argmax(smooth_counts)
     i0 = max(0, i_max - fit_half_width_bins)
     i1 = min(len(x), i_max + fit_half_width_bins + 1)
 
-    x_fit = np.asarray(x[i0:i1], dtype=float)
-    y_fit = np.asarray(counts[i0:i1], dtype=float)
+    x_fit = x[i0:i1]
+    y_fit = counts[i0:i1]
 
     x0_guess = x[i_max]
-    A_guess = max(counts[i_max] - np.min(y_fit), 1.0)
+    A_guess = max(np.max(y_fit) - np.min(y_fit), 1.0)
     sigma_guess = max((x_fit.max() - x_fit.min()) / 6, 1e-3)
     y0_guess = max(np.min(y_fit), 0.0)
     yerr = np.sqrt(y_fit)
