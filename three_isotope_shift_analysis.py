@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
+import satlas2
 
 
 C = 299792458.0
@@ -10,6 +10,25 @@ AMU = 1.66053906660e-27
 
 def gaussian(x, A, x0, sigma, y0):
     return A * np.exp(-0.5 * ((x - x0) / sigma) ** 2) + y0
+
+
+class GaussianModel(satlas2.Model):
+    def __init__(self, amplitude, center, sigma, background, name="Gaussian", prefunc=None):
+        super().__init__(name, prefunc=prefunc)
+        self.params = {
+            "amplitude": satlas2.Parameter(value=amplitude, min=0.0, max=np.inf, vary=True),
+            "center": satlas2.Parameter(value=center, vary=True),
+            "sigma": satlas2.Parameter(value=sigma, min=1e-12, max=np.inf, vary=True),
+            "background": satlas2.Parameter(value=background, vary=True),
+        }
+
+    def f(self, x):
+        x = self.transform(x)
+        amplitude = self.params["amplitude"].value
+        center = self.params["center"].value
+        sigma = self.params["sigma"].value
+        background = self.params["background"].value
+        return gaussian(x, amplitude, center, sigma, background)
 
 
 def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, geometry="collinear"):
@@ -36,11 +55,37 @@ def fit_histogram_peak(x, counts):
     A_guess = counts[i_max] - np.min(counts)
     sigma_guess = max((x.max() - x.min()) / 20, 1e-6)
     y0_guess = np.min(counts)
+    yerr = np.sqrt(np.asarray(counts, dtype=float))
+    yerr[yerr <= 0] = 1.0
 
-    p0 = [A_guess, x0_guess, sigma_guess, y0_guess]
-    popt, pcov = curve_fit(gaussian, x, counts, p0=p0, maxfev=10000)
-    perr = np.sqrt(np.diag(pcov))
-    return popt, pcov, perr
+    model = GaussianModel(A_guess, x0_guess, sigma_guess, y0_guess)
+    source = satlas2.Source(x, counts, yerr=yerr, name="HistogramData")
+    source.addModel(model)
+
+    fitter = satlas2.Fitter()
+    fitter.addSource(source)
+    fitter.fit(method="slsqp")
+
+    params = model.params
+    popt = np.array(
+        [
+            params["amplitude"].value,
+            params["center"].value,
+            params["sigma"].value,
+            params["background"].value,
+        ],
+        dtype=float,
+    )
+    perr = np.array(
+        [
+            getattr(params["amplitude"], "unc", np.nan),
+            getattr(params["center"], "unc", np.nan),
+            getattr(params["sigma"], "unc", np.nan),
+            getattr(params["background"], "unc", np.nan),
+        ],
+        dtype=float,
+    )
+    return popt, None, perr
 
 
 def clean_numeric_column(dat, col):

@@ -18,8 +18,10 @@ Install the Python packages used by the scripts:
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
+import satlas2
 ```
+
+`satlas2` provides the Gaussian fitting used in the isotope-shift scripts. Install it with `pip install satlas2`.
 
 ## Two-Isotope Example
 
