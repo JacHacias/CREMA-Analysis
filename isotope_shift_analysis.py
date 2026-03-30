@@ -51,12 +51,27 @@ def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, 
     return np.asarray(nu_lab_ghz, dtype=float) * factor
 
 
-def fit_histogram_peak(x, counts, fit_half_width_bins=10, smooth_sigma_bins=2):
+def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
     counts = np.asarray(counts, dtype=float)
     x = np.asarray(x, dtype=float)
 
     smooth_counts = gaussian_filter1d(counts, smooth_sigma_bins)
     i_max = np.argmax(smooth_counts)
+
+    peak_height = smooth_counts[i_max]
+    half_max = 0.5 * peak_height
+
+    i_left = i_max
+    while i_left > 0 and smooth_counts[i_left] > half_max:
+        i_left -= 1
+
+    i_right = i_max
+    while i_right < len(smooth_counts) - 1 and smooth_counts[i_right] > half_max:
+        i_right += 1
+
+    fwhm_bins = max(i_right - i_left, 3)
+    fit_half_width_bins = max(4, int(1.5 * fwhm_bins))
+
     i0 = max(0, i_max - fit_half_width_bins)
     i1 = min(len(x), i_max + fit_half_width_bins + 1)
 
@@ -64,9 +79,13 @@ def fit_histogram_peak(x, counts, fit_half_width_bins=10, smooth_sigma_bins=2):
     y_fit = counts[i0:i1]
 
     center_guess = x[i_max]
-    amplitude_guess = max(np.max(y_fit) - np.min(y_fit), 1.0)
-    sigma_guess = max((x_fit.max() - x_fit.min()) / 6.0, 1e-3)
-    background_guess = max(np.min(y_fit), 0.0)
+    edge_points = np.r_[y_fit[:2], y_fit[-2:]]
+    background_guess = max(np.median(edge_points), 0.0)
+    amplitude_guess = max(np.max(y_fit) - background_guess, 1.0)
+    if i_right > i_left:
+        sigma_guess = max((x[i_right] - x[i_left]) / 2.355, 1e-3)
+    else:
+        sigma_guess = max((x_fit.max() - x_fit.min()) / 6.0, 1e-3)
     yerr = np.sqrt(y_fit)
     yerr[yerr <= 0] = 1.0
 
@@ -78,8 +97,9 @@ def fit_histogram_peak(x, counts, fit_half_width_bins=10, smooth_sigma_bins=2):
     else:
         dx = 1e-3
     model.params["sigma"].min = max(dx / 2.0, 1e-3)
-    model.params["sigma"].max = max(x_fit.max() - x_fit.min(), 1e-2)
+    model.params["sigma"].max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
     model.params["background"].min = 0.0
+    model.params["background"].max = max(np.max(y_fit), 1.0)
 
     source = satlas2.Source(x_fit, y_fit, yerr=yerr, name="HistogramData")
     source.addModel(model)
