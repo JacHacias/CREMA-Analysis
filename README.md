@@ -35,6 +35,7 @@ out = plot_two_isotopes_fit(
     mass2_u=33.967867,
     wn_col="wavemeter_wn1",
     bin_width_MHz=20.0,
+    tof_gate_us=(4.25, 5.5),
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=1.2,
     geometry="collinear",
@@ -57,6 +58,7 @@ out = plot_three_isotopes_fit(
     mass36_u=35.967081,
     wn_col="wavemeter_wn1",
     bin_width_MHz=20.0,
+    tof_gate_us=(4.25, 5.5),
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=1.2,
     geometry="collinear",
@@ -67,5 +69,6 @@ out = plot_three_isotopes_fit(
 
 - `beam_voltage_unc_V` should include the effect of HV drift/oscillation if the scans were taken at different times.
 - You can use either `bins=...` or `bin_width_MHz=...` to control histogram binning. If `bin_width_MHz` is given, it takes precedence.
+- You can optionally apply ToF gating inside the analysis functions with `tof_gate_us=(min_us, max_us)`. If you already passed pre-gated cut files, leave this as `None`.
 - If your laser geometry is opposite to the ion beam, use `geometry="anticollinear"`.
 - The scripts clean the wavemeter column as numeric input before fitting, which helps avoid string-type issues from structured arrays.

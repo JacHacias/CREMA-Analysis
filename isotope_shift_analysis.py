@@ -135,6 +135,32 @@ def clean_numeric_column(dat, col):
     return x[np.isfinite(x)]
 
 
+def apply_tof_gate(dat, tof_gate_us=None, tof_col="tof"):
+    if tof_gate_us is None:
+        return dat
+
+    if tof_col not in dat.dtype.names:
+        raise KeyError(f"Column '{tof_col}' not found. Available: {dat.dtype.names}")
+
+    if len(tof_gate_us) != 2:
+        raise ValueError("tof_gate_us must be a (min_us, max_us) pair.")
+
+    tmin_us, tmax_us = [float(v) for v in tof_gate_us]
+    if tmax_us <= tmin_us:
+        raise ValueError("tof_gate_us must satisfy max_us > min_us.")
+
+    t_us = np.array(dat[tof_col], dtype=float) * 1e6
+    mask = np.isfinite(t_us) & (t_us > tmin_us) & (t_us < tmax_us)
+    gated = dat[mask]
+
+    if gated.size == 0:
+        raise ValueError(
+            f"No events remain after ToF gate {tof_gate_us} us on column '{tof_col}'."
+        )
+
+    return gated
+
+
 def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     if bin_width_MHz is None:
         return bins
@@ -222,6 +248,8 @@ def plot_two_isotopes_fit(
     wn_col="wavemeter_wn1",
     bins=120,
     bin_width_MHz=None,
+    tof_gate_us=None,
+    tof_col="tof",
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     charge_e=1,
@@ -234,6 +262,9 @@ def plot_two_isotopes_fit(
 
     Returns fit centers and uncertainties for each isotope and the propagated isotope shift.
     """
+    cut_file_1 = apply_tof_gate(cut_file_1, tof_gate_us=tof_gate_us, tof_col=tof_col)
+    cut_file_2 = apply_tof_gate(cut_file_2, tof_gate_us=tof_gate_us, tof_col=tof_col)
+
     nu1_lab = clean_numeric_column(cut_file_1, wn_col) * C * 100.0 * 1e-9
     nu2_lab = clean_numeric_column(cut_file_2, wn_col) * C * 100.0 * 1e-9
 
@@ -353,6 +384,10 @@ def plot_two_isotopes_fit(
         "isotope_shift_fit_unc_GHz": float(isotope_shift_fit_unc),
         "isotope_shift_voltage_unc_GHz": float(isotope_shift_V_unc),
         "isotope_shift_total_unc_GHz": float(isotope_shift_total_unc),
+        "tof_gate_us": tof_gate_us,
+        "tof_col": tof_col,
+        "num_points_1": int(cut_file_1.size),
+        "num_points_2": int(cut_file_2.size),
     }
 
 

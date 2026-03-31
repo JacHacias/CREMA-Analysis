@@ -134,6 +134,32 @@ def clean_numeric_column(dat, col):
     return x[np.isfinite(x)]
 
 
+def apply_tof_gate(dat, tof_gate_us=None, tof_col="tof"):
+    if tof_gate_us is None:
+        return dat
+
+    if tof_col not in dat.dtype.names:
+        raise KeyError(f"Column '{tof_col}' not found. Available: {dat.dtype.names}")
+
+    if len(tof_gate_us) != 2:
+        raise ValueError("tof_gate_us must be a (min_us, max_us) pair.")
+
+    tmin_us, tmax_us = [float(v) for v in tof_gate_us]
+    if tmax_us <= tmin_us:
+        raise ValueError("tof_gate_us must satisfy max_us > min_us.")
+
+    t_us = np.array(dat[tof_col], dtype=float) * 1e6
+    mask = np.isfinite(t_us) & (t_us > tmin_us) & (t_us < tmax_us)
+    gated = dat[mask]
+
+    if gated.size == 0:
+        raise ValueError(
+            f"No events remain after ToF gate {tof_gate_us} us on column '{tof_col}'."
+        )
+
+    return gated
+
+
 def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     if bin_width_MHz is None:
         return bins
@@ -231,11 +257,17 @@ def plot_three_isotopes_fit(
     wn_col="wavemeter_wn1",
     bins=120,
     bin_width_MHz=None,
+    tof_gate_us=None,
+    tof_col="tof",
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     charge_e=1,
     geometry="collinear",
 ):
+    cut_file_32S = apply_tof_gate(cut_file_32S, tof_gate_us=tof_gate_us, tof_col=tof_col)
+    cut_file_34S = apply_tof_gate(cut_file_34S, tof_gate_us=tof_gate_us, tof_col=tof_col)
+    cut_file_36S = apply_tof_gate(cut_file_36S, tof_gate_us=tof_gate_us, tof_col=tof_col)
+
     nu32_lab = clean_numeric_column(cut_file_32S, wn_col) * C * 100.0 * 1e-9
     nu34_lab = clean_numeric_column(cut_file_34S, wn_col) * C * 100.0 * 1e-9
     nu36_lab = clean_numeric_column(cut_file_36S, wn_col) * C * 100.0 * 1e-9
@@ -350,6 +382,11 @@ def plot_three_isotopes_fit(
         "shift_34_32_total_unc_GHz": float(shift_34_32_total_unc),
         "shift_36_32_GHz": float(shift_36_32),
         "shift_36_32_total_unc_GHz": float(shift_36_32_total_unc),
+        "tof_gate_us": tof_gate_us,
+        "tof_col": tof_col,
+        "num_points_32S": int(cut_file_32S.size),
+        "num_points_34S": int(cut_file_34S.size),
+        "num_points_36S": int(cut_file_36S.size),
     }
 
 
