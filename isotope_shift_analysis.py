@@ -219,21 +219,21 @@ def plot_two_isotopes_fit(
     isotope_shift_V_unc = 0.0
 
     if beam_voltage_unc_V > 0:
-        c1_plus, _, _, _, _, _ = _fit_center_from_voltage(
+        c1_plus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_1, mass1_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
             bin_width_MHz=bin_width_MHz
         )
-        c1_minus, _, _, _, _, _ = _fit_center_from_voltage(
+        c1_minus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_1, mass1_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
             bin_width_MHz=bin_width_MHz
         )
         dcenter1_V = abs(float(c1_plus) - float(c1_minus)) / 2.0
 
-        c2_plus, _, _, _, _, _ = _fit_center_from_voltage(
+        c2_plus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_2, mass2_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
             bin_width_MHz=bin_width_MHz
         )
-        c2_minus, _, _, _, _, _ = _fit_center_from_voltage(
+        c2_minus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_2, mass2_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
             bin_width_MHz=bin_width_MHz
         )
