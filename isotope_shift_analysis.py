@@ -161,6 +161,38 @@ def apply_tof_gate(dat, tof_gate_us=None, tof_col="tof"):
     return gated
 
 
+def plot_tof_gate_summary(dat, tof_gate_us=None, tof_col="tof", bins=100, label="Data"):
+    if tof_col not in dat.dtype.names:
+        raise KeyError(f"Column '{tof_col}' not found. Available: {dat.dtype.names}")
+
+    t_us = np.array(dat[tof_col], dtype=float) * 1e6
+    raw_t_us = t_us[np.isfinite(t_us) & (t_us > 0)]
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=False)
+
+    axes[0].hist(raw_t_us, bins=bins, color="C0", alpha=0.8)
+    axes[0].set_title(f"{label} Raw ToF", fontweight="bold")
+    axes[0].set_xlabel("ToF (us)", fontweight="bold")
+    axes[0].set_ylabel("Counts", fontweight="bold")
+
+    if tof_gate_us is None:
+        gated_t_us = raw_t_us
+        gate_title = f"{label} ToF (no gate)"
+    else:
+        tmin_us, tmax_us = [float(v) for v in tof_gate_us]
+        gate_mask = np.isfinite(t_us) & (t_us > tmin_us) & (t_us < tmax_us)
+        gated_t_us = t_us[gate_mask]
+        gate_title = f"{label} Gated ToF ({tmin_us:.3f} to {tmax_us:.3f} us)"
+
+    axes[1].hist(gated_t_us, bins=bins, color="C1", alpha=0.8)
+    axes[1].set_title(gate_title, fontweight="bold")
+    axes[1].set_xlabel("ToF (us)", fontweight="bold")
+    axes[1].set_ylabel("Counts", fontweight="bold")
+
+    plt.tight_layout()
+    plt.show()
+
+
 def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     if bin_width_MHz is None:
         return bins
@@ -250,6 +282,8 @@ def plot_two_isotopes_fit(
     bin_width_MHz=None,
     tof_gate_us=None,
     tof_col="tof",
+    show_tof_gate_plots=False,
+    tof_plot_bins=100,
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     charge_e=1,
@@ -262,6 +296,10 @@ def plot_two_isotopes_fit(
 
     Returns fit centers and uncertainties for each isotope and the propagated isotope shift.
     """
+    if show_tof_gate_plots:
+        plot_tof_gate_summary(cut_file_1, tof_gate_us=tof_gate_us, tof_col=tof_col, bins=tof_plot_bins, label=label1)
+        plot_tof_gate_summary(cut_file_2, tof_gate_us=tof_gate_us, tof_col=tof_col, bins=tof_plot_bins, label=label2)
+
     cut_file_1 = apply_tof_gate(cut_file_1, tof_gate_us=tof_gate_us, tof_col=tof_col)
     cut_file_2 = apply_tof_gate(cut_file_2, tof_gate_us=tof_gate_us, tof_col=tof_col)
 
@@ -386,6 +424,7 @@ def plot_two_isotopes_fit(
         "isotope_shift_total_unc_GHz": float(isotope_shift_total_unc),
         "tof_gate_us": tof_gate_us,
         "tof_col": tof_col,
+        "show_tof_gate_plots": bool(show_tof_gate_plots),
         "num_points_1": int(cut_file_1.size),
         "num_points_2": int(cut_file_2.size),
     }
