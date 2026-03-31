@@ -162,10 +162,11 @@ def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     return edges
 
 
-def _occupied_xlim(centers, counts, fallback_x):
+def _occupied_xlim(centers, counts, fallback_x, include_points=None):
     centers = np.asarray(centers, dtype=float)
     counts = np.asarray(counts, dtype=float)
     fallback_x = np.asarray(fallback_x, dtype=float)
+    include_points = [] if include_points is None else [float(v) for v in include_points]
 
     occupied = counts > 0
     if np.any(occupied):
@@ -179,6 +180,17 @@ def _occupied_xlim(centers, counts, fallback_x):
         x_min = float(np.min(fallback_x))
         x_max = float(np.max(fallback_x))
         dx = max(abs(x_max - x_min) / 20.0, 1e-3)
+
+    if fallback_x.size:
+        x_min = min(x_min, float(np.min(fallback_x)))
+        x_max = max(x_max, float(np.max(fallback_x)))
+
+    if include_points:
+        x_min = min([x_min] + include_points)
+        x_max = max([x_max] + include_points)
+
+    x_min -= 0.5 * dx
+    x_max += 0.5 * dx
 
     if x_max <= x_min:
         pad = max(dx, 1e-3)
@@ -285,9 +297,9 @@ def plot_three_isotopes_fit(
         (axes[2], res36, "36S", "C2"),
     ]
     xlims = [
-        _occupied_xlim(res32["centers"], res32["counts"], res32["x"]),
-        _occupied_xlim(res34["centers"], res34["counts"], res34["x"]),
-        _occupied_xlim(res36["centers"], res36["counts"], res36["x"]),
+        _occupied_xlim(res32["centers"], res32["counts"], res32["x"], include_points=[res32["center"], 0.0]),
+        _occupied_xlim(res34["centers"], res34["counts"], res34["x"], include_points=[res34["center"], 0.0]),
+        _occupied_xlim(res36["centers"], res36["counts"], res36["x"], include_points=[res36["center"], 0.0]),
     ]
     x_left = min(limit[0] for limit in xlims)
     x_right = max(limit[1] for limit in xlims)

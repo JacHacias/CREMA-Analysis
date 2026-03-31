@@ -163,10 +163,11 @@ def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     return edges
 
 
-def _occupied_xlim(centers, counts, fallback_x):
+def _occupied_xlim(centers, counts, fallback_x, include_points=None):
     centers = np.asarray(centers, dtype=float)
     counts = np.asarray(counts, dtype=float)
     fallback_x = np.asarray(fallback_x, dtype=float)
+    include_points = [] if include_points is None else [float(v) for v in include_points]
 
     occupied = counts > 0
     if np.any(occupied):
@@ -180,6 +181,17 @@ def _occupied_xlim(centers, counts, fallback_x):
         x_min = float(np.min(fallback_x))
         x_max = float(np.max(fallback_x))
         dx = max(abs(x_max - x_min) / 20.0, 1e-3)
+
+    if fallback_x.size:
+        x_min = min(x_min, float(np.min(fallback_x)))
+        x_max = max(x_max, float(np.max(fallback_x)))
+
+    if include_points:
+        x_min = min([x_min] + include_points)
+        x_max = max([x_max] + include_points)
+
+    x_min -= 0.5 * dx
+    x_max += 0.5 * dx
 
     if x_max <= x_min:
         pad = max(dx, 1e-3)
@@ -277,8 +289,8 @@ def plot_two_isotopes_fit(
     xfit2 = np.linspace(centers2.min(), centers2.max(), 2000)
     yfit1 = gaussian(xfit1, *p1)
     yfit2 = gaussian(xfit2, *p2)
-    xlim1 = _occupied_xlim(centers1, counts1, x1)
-    xlim2 = _occupied_xlim(centers2, counts2, x2)
+    xlim1 = _occupied_xlim(centers1, counts1, x1, include_points=[center1, 0.0])
+    xlim2 = _occupied_xlim(centers2, counts2, x2, include_points=[center2, 0.0])
     x_left = min(xlim1[0], xlim2[0])
     x_right = max(xlim1[1], xlim2[1])
 
