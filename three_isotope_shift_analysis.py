@@ -37,8 +37,8 @@ def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, 
     q = charge_e * E_CHARGE
     KE = q * beam_voltage_V
 
-    beta = np.sqrt(2.0 * KE / (m * C**2))
-    gamma = 1.0 / np.sqrt(1.0 - beta**2)
+    gamma = 1.0 + KE / (m * C**2)
+    beta = np.sqrt(1.0 - 1.0 / gamma**2)
 
     if geometry == "collinear":
         factor = gamma * (1.0 - beta)
