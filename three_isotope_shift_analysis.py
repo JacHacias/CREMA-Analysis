@@ -162,6 +162,32 @@ def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     return edges
 
 
+def _occupied_xlim(centers, counts, fallback_x):
+    centers = np.asarray(centers, dtype=float)
+    counts = np.asarray(counts, dtype=float)
+    fallback_x = np.asarray(fallback_x, dtype=float)
+
+    occupied = counts > 0
+    if np.any(occupied):
+        x_min = float(np.min(centers[occupied]))
+        x_max = float(np.max(centers[occupied]))
+        if centers.size > 1:
+            dx = float(np.median(np.diff(centers)))
+        else:
+            dx = max(abs(x_max - x_min), 1e-3)
+    else:
+        x_min = float(np.min(fallback_x))
+        x_max = float(np.max(fallback_x))
+        dx = max(abs(x_max - x_min) / 20.0, 1e-3)
+
+    if x_max <= x_min:
+        pad = max(dx, 1e-3)
+    else:
+        pad = max(2.0 * dx, 0.08 * (x_max - x_min))
+
+    return x_min - pad, x_max + pad
+
+
 def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref, bin_width_MHz=None):
     nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
     nu = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
@@ -258,6 +284,13 @@ def plot_three_isotopes_fit(
         (axes[1], res34, "34S", "C1"),
         (axes[2], res36, "36S", "C2"),
     ]
+    xlims = [
+        _occupied_xlim(res32["centers"], res32["counts"], res32["x"]),
+        _occupied_xlim(res34["centers"], res34["counts"], res34["x"]),
+        _occupied_xlim(res36["centers"], res36["counts"], res36["x"]),
+    ]
+    x_left = min(limit[0] for limit in xlims)
+    x_right = max(limit[1] for limit in xlims)
 
     for ax, res, label, color in plot_info:
         xfit = np.linspace(res["centers"].min(), res["centers"].max(), 2000)
@@ -274,10 +307,10 @@ def plot_three_isotopes_fit(
         ax.axvline(0.0, color="k", linestyle=":", label=r"$\nu_0$")
         ax.set_ylabel("Counts", fontweight="bold")
         ax.set_title(label, fontweight="bold")
-        ax.set_xlim(res["x_fit_window"].min() - 1.0, res["x_fit_window"].max() + 1.0)
         ax.legend()
 
     axes[-1].set_xlabel(r"Corrected frequency relative to $\nu_0$ (GHz)", fontweight="bold")
+    axes[-1].set_xlim(x_left, x_right)
     fig.suptitle("Doppler-Corrected Sulfur Isotope Comparison", fontweight="bold", fontsize="x-large")
     plt.tight_layout()
     plt.show()

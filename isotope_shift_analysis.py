@@ -163,6 +163,32 @@ def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     return edges
 
 
+def _occupied_xlim(centers, counts, fallback_x):
+    centers = np.asarray(centers, dtype=float)
+    counts = np.asarray(counts, dtype=float)
+    fallback_x = np.asarray(fallback_x, dtype=float)
+
+    occupied = counts > 0
+    if np.any(occupied):
+        x_min = float(np.min(centers[occupied]))
+        x_max = float(np.max(centers[occupied]))
+        if centers.size > 1:
+            dx = float(np.median(np.diff(centers)))
+        else:
+            dx = max(abs(x_max - x_min), 1e-3)
+    else:
+        x_min = float(np.min(fallback_x))
+        x_max = float(np.max(fallback_x))
+        dx = max(abs(x_max - x_min) / 20.0, 1e-3)
+
+    if x_max <= x_min:
+        pad = max(dx, 1e-3)
+    else:
+        pad = max(2.0 * dx, 0.08 * (x_max - x_min))
+
+    return x_min - pad, x_max + pad
+
+
 def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref, bin_width_MHz=None):
     nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
     nu_rest = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
@@ -251,6 +277,10 @@ def plot_two_isotopes_fit(
     xfit2 = np.linspace(centers2.min(), centers2.max(), 2000)
     yfit1 = gaussian(xfit1, *p1)
     yfit2 = gaussian(xfit2, *p2)
+    xlim1 = _occupied_xlim(centers1, counts1, x1)
+    xlim2 = _occupied_xlim(centers2, counts2, x2)
+    x_left = min(xlim1[0], xlim2[0])
+    x_right = max(xlim1[1], xlim2[1])
 
     fig, axes = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
 
@@ -265,7 +295,6 @@ def plot_two_isotopes_fit(
     axes[0].axvline(0.0, color="k", linestyle=":", label=r"$\nu_0$")
     axes[0].set_ylabel("Counts", fontweight="bold")
     axes[0].set_title(label1, fontweight="bold")
-    axes[0].set_xlim(xfit_window1.min() - 1.0, xfit_window1.max() + 1.0)
     axes[0].legend()
 
     axes[1].step(centers2, counts2, where="mid", color="C1", alpha=0.75, label=label2)
@@ -280,8 +309,8 @@ def plot_two_isotopes_fit(
     axes[1].set_ylabel("Counts", fontweight="bold")
     axes[1].set_xlabel(r"Corrected frequency relative to $\nu_0$ (GHz)", fontweight="bold")
     axes[1].set_title(label2, fontweight="bold")
-    axes[1].set_xlim(xfit_window2.min() - 1.0, xfit_window2.max() + 1.0)
     axes[1].legend()
+    axes[1].set_xlim(x_left, x_right)
 
     fig.suptitle("Doppler-Corrected Isotope Comparison", fontweight="bold", fontsize="x-large")
     plt.tight_layout()
