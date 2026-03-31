@@ -134,12 +134,41 @@ def clean_numeric_column(dat, col):
     return x[np.isfinite(x)]
 
 
-def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref):
+def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
+    if bin_width_MHz is None:
+        return bins
+
+    bin_width_GHz = float(bin_width_MHz) / 1000.0
+    if bin_width_GHz <= 0:
+        raise ValueError("bin_width_MHz must be positive.")
+
+    x = np.asarray(x, dtype=float)
+    x_min = float(np.min(x))
+    x_max = float(np.max(x))
+
+    if not np.isfinite(x_min) or not np.isfinite(x_max):
+        raise ValueError("Histogram data must be finite.")
+
+    if x_max <= x_min:
+        return np.array([x_min - 0.5 * bin_width_GHz, x_max + 0.5 * bin_width_GHz], dtype=float)
+
+    start = x_min - 0.5 * bin_width_GHz
+    stop = x_max + 1.5 * bin_width_GHz
+    edges = np.arange(start, stop, bin_width_GHz, dtype=float)
+
+    if edges.size < 2:
+        edges = np.array([x_min - 0.5 * bin_width_GHz, x_max + 0.5 * bin_width_GHz], dtype=float)
+
+    return edges
+
+
+def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref, bin_width_MHz=None):
     nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
     nu = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
     x = nu - nu0_ref
 
-    counts, edges = np.histogram(x, bins=bins)
+    hist_bins = _resolve_histogram_bins(x, bins=bins, bin_width_MHz=bin_width_MHz)
+    counts, edges = np.histogram(x, bins=hist_bins)
     centers = 0.5 * (edges[:-1] + edges[1:])
 
     p, cov, err, x_fit = fit_histogram_peak(centers, counts)
@@ -163,6 +192,7 @@ def plot_three_isotopes_fit(
     mass36_u=35.967081,
     wn_col="wavemeter_wn1",
     bins=120,
+    bin_width_MHz=None,
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     charge_e=1,
@@ -178,9 +208,15 @@ def plot_three_isotopes_fit(
 
     nu0 = np.median(nu32)
 
-    res32 = _fit_center_from_voltage(cut_file_32S, mass32_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0)
-    res34 = _fit_center_from_voltage(cut_file_34S, mass34_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0)
-    res36 = _fit_center_from_voltage(cut_file_36S, mass36_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0)
+    res32 = _fit_center_from_voltage(
+        cut_file_32S, mass32_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+    )
+    res34 = _fit_center_from_voltage(
+        cut_file_34S, mass34_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+    )
+    res36 = _fit_center_from_voltage(
+        cut_file_36S, mass36_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+    )
 
     for res in (res32, res34, res36):
         res["center_voltage_unc"] = 0.0
@@ -192,10 +228,12 @@ def plot_three_isotopes_fit(
             (cut_file_36S, mass36_u, res36),
         ]:
             c_plus = _fit_center_from_voltage(
-                dat, mass_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
+                dat, mass_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
+                bin_width_MHz=bin_width_MHz
             )["center"]
             c_minus = _fit_center_from_voltage(
-                dat, mass_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
+                dat, mass_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
+                bin_width_MHz=bin_width_MHz
             )["center"]
             res["center_voltage_unc"] = abs(c_plus - c_minus) / 2.0
 

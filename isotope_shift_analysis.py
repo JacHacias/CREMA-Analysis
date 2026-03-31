@@ -135,12 +135,41 @@ def clean_numeric_column(dat, col):
     return x[np.isfinite(x)]
 
 
-def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref):
+def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
+    if bin_width_MHz is None:
+        return bins
+
+    bin_width_GHz = float(bin_width_MHz) / 1000.0
+    if bin_width_GHz <= 0:
+        raise ValueError("bin_width_MHz must be positive.")
+
+    x = np.asarray(x, dtype=float)
+    x_min = float(np.min(x))
+    x_max = float(np.max(x))
+
+    if not np.isfinite(x_min) or not np.isfinite(x_max):
+        raise ValueError("Histogram data must be finite.")
+
+    if x_max <= x_min:
+        return np.array([x_min - 0.5 * bin_width_GHz, x_max + 0.5 * bin_width_GHz], dtype=float)
+
+    start = x_min - 0.5 * bin_width_GHz
+    stop = x_max + 1.5 * bin_width_GHz
+    edges = np.arange(start, stop, bin_width_GHz, dtype=float)
+
+    if edges.size < 2:
+        edges = np.array([x_min - 0.5 * bin_width_GHz, x_max + 0.5 * bin_width_GHz], dtype=float)
+
+    return edges
+
+
+def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref, bin_width_MHz=None):
     nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
     nu_rest = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
     x = nu_rest - nu0_ref
 
-    counts, edges = np.histogram(x, bins=bins)
+    hist_bins = _resolve_histogram_bins(x, bins=bins, bin_width_MHz=bin_width_MHz)
+    counts, edges = np.histogram(x, bins=hist_bins)
     centers = 0.5 * (edges[:-1] + edges[1:])
 
     popt, pcov, perr, x_fit = fit_histogram_peak(centers, counts)
@@ -154,6 +183,7 @@ def plot_two_isotopes_fit(
     mass2_u,
     wn_col="wavemeter_wn1",
     bins=120,
+    bin_width_MHz=None,
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     charge_e=1,
@@ -175,10 +205,10 @@ def plot_two_isotopes_fit(
     nu0 = 0.5 * (np.median(nu1) + np.median(nu2))
 
     center1, dcenter1_fit, x1, counts1, centers1, p1, xfit_window1 = _fit_center_from_voltage(
-        cut_file_1, mass1_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0
+        cut_file_1, mass1_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
     )
     center2, dcenter2_fit, x2, counts2, centers2, p2, xfit_window2 = _fit_center_from_voltage(
-        cut_file_2, mass2_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0
+        cut_file_2, mass2_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
     )
 
     isotope_shift = float(center2) - float(center1)
@@ -190,18 +220,22 @@ def plot_two_isotopes_fit(
 
     if beam_voltage_unc_V > 0:
         c1_plus, _, _, _, _, _ = _fit_center_from_voltage(
-            cut_file_1, mass1_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
+            cut_file_1, mass1_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
+            bin_width_MHz=bin_width_MHz
         )
         c1_minus, _, _, _, _, _ = _fit_center_from_voltage(
-            cut_file_1, mass1_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
+            cut_file_1, mass1_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
+            bin_width_MHz=bin_width_MHz
         )
         dcenter1_V = abs(float(c1_plus) - float(c1_minus)) / 2.0
 
         c2_plus, _, _, _, _, _ = _fit_center_from_voltage(
-            cut_file_2, mass2_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
+            cut_file_2, mass2_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
+            bin_width_MHz=bin_width_MHz
         )
         c2_minus, _, _, _, _, _ = _fit_center_from_voltage(
-            cut_file_2, mass2_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0
+            cut_file_2, mass2_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
+            bin_width_MHz=bin_width_MHz
         )
         dcenter2_V = abs(float(c2_plus) - float(c2_minus)) / 2.0
 
