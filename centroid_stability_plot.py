@@ -1,7 +1,6 @@
 from datetime import datetime
 import re
 
-import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -17,6 +16,32 @@ def _parse_timestamp(value):
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(str(value))
+
+
+def _build_day_positions(timestamps):
+    day_keys = [ts.date().isoformat() for ts in timestamps]
+    unique_days = []
+    for key in day_keys:
+        if key not in unique_days:
+            unique_days.append(key)
+
+    x_positions = []
+    tick_positions = []
+    tick_labels = []
+
+    for day_index, day_key in enumerate(unique_days):
+        indices = [i for i, key in enumerate(day_keys) if key == day_key]
+        count = len(indices)
+        offsets = np.arange(count, dtype=float) - 0.5 * (count - 1)
+        offsets *= 0.18
+
+        for offset in offsets:
+            x_positions.append(day_index + offset)
+
+        tick_positions.append(day_index)
+        tick_labels.append(datetime.fromisoformat(day_key).strftime("%m/%d/%y"))
+
+    return np.array(x_positions, dtype=float), tick_positions, tick_labels
 
 
 def parse_centroid_output_blocks(text):
@@ -115,7 +140,7 @@ def parse_centroid_output_blocks(text):
 
 def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     """
-    Plot 32S/34S centroid positions over time in MHz with uncertainty breakdowns.
+    Plot 32S/34S centroid positions by day in MHz with uncertainty breakdowns.
 
     Parameters
     ----------
@@ -143,6 +168,7 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
 
     entries = sorted(results, key=lambda item: _parse_timestamp(item["timestamp"]))
     times = [_parse_timestamp(item["timestamp"]) for item in entries]
+    x_positions, tick_positions, tick_labels = _build_day_positions(times)
 
     center_32 = np.array([_to_mhz(item["center_32_GHz"]) for item in entries], dtype=float)
     center_34 = np.array([_to_mhz(item["center_34_GHz"]) for item in entries], dtype=float)
@@ -185,41 +211,41 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         "linewidth": 1.2,
     }
 
-    axes[0].errorbar(times, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
-    axes[0].plot(times, center_32 + fit_32, linestyle=":", color="C0", alpha=0.55, label="32S fit contribution")
-    axes[0].plot(times, center_32 - fit_32, linestyle=":", color="C0", alpha=0.55)
-    axes[0].plot(times, center_32 + voltage_32, linestyle="--", color="C0", alpha=0.55, label="32S voltage contribution")
-    axes[0].plot(times, center_32 - voltage_32, linestyle="--", color="C0", alpha=0.55)
+    axes[0].errorbar(x_positions, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
+    axes[0].plot(x_positions, center_32 + fit_32, linestyle=":", color="C0", alpha=0.55, label="32S fit contribution")
+    axes[0].plot(x_positions, center_32 - fit_32, linestyle=":", color="C0", alpha=0.55)
+    axes[0].plot(x_positions, center_32 + voltage_32, linestyle="--", color="C0", alpha=0.55, label="32S voltage contribution")
+    axes[0].plot(x_positions, center_32 - voltage_32, linestyle="--", color="C0", alpha=0.55)
     axes[0].set_ylabel("32S centroid (MHz)", fontweight="bold")
     axes[0].set_title(title, fontweight="bold")
     axes[0].legend(loc="best")
 
-    axes[1].errorbar(times, center_34, yerr=total_34, fmt="o-", color="C1", label="34S centroid (total)", **centroid_style)
-    axes[1].plot(times, center_34 + fit_34, linestyle=":", color="C1", alpha=0.55, label="34S fit contribution")
-    axes[1].plot(times, center_34 - fit_34, linestyle=":", color="C1", alpha=0.55)
-    axes[1].plot(times, center_34 + voltage_34, linestyle="--", color="C1", alpha=0.55, label="34S voltage contribution")
-    axes[1].plot(times, center_34 - voltage_34, linestyle="--", color="C1", alpha=0.55)
+    axes[1].errorbar(x_positions, center_34, yerr=total_34, fmt="o-", color="C1", label="34S centroid (total)", **centroid_style)
+    axes[1].plot(x_positions, center_34 + fit_34, linestyle=":", color="C1", alpha=0.55, label="34S fit contribution")
+    axes[1].plot(x_positions, center_34 - fit_34, linestyle=":", color="C1", alpha=0.55)
+    axes[1].plot(x_positions, center_34 + voltage_34, linestyle="--", color="C1", alpha=0.55, label="34S voltage contribution")
+    axes[1].plot(x_positions, center_34 - voltage_34, linestyle="--", color="C1", alpha=0.55)
     axes[1].set_ylabel("34S centroid (MHz)", fontweight="bold")
     axes[1].legend(loc="best")
 
-    axes[2].plot(times, fit_32, "o:", color="C0", label="32S fit")
-    axes[2].plot(times, voltage_32, "o--", color="C0", label="32S voltage")
-    axes[2].plot(times, total_32, "o-", color="C0", alpha=0.8, label="32S total")
-    axes[2].plot(times, fit_34, "s:", color="C1", label="34S fit")
-    axes[2].plot(times, voltage_34, "s--", color="C1", label="34S voltage")
-    axes[2].plot(times, total_34, "s-", color="C1", alpha=0.8, label="34S total")
+    axes[2].plot(x_positions, fit_32, "o:", color="C0", label="32S fit")
+    axes[2].plot(x_positions, voltage_32, "o--", color="C0", label="32S voltage")
+    axes[2].plot(x_positions, total_32, "o-", color="C0", alpha=0.8, label="32S total")
+    axes[2].plot(x_positions, fit_34, "s:", color="C1", label="34S fit")
+    axes[2].plot(x_positions, voltage_34, "s--", color="C1", label="34S voltage")
+    axes[2].plot(x_positions, total_34, "s-", color="C1", alpha=0.8, label="34S total")
     axes[2].set_ylabel("Uncertainty (MHz)", fontweight="bold")
-    axes[2].set_xlabel("Timestamp", fontweight="bold")
+    axes[2].set_xlabel("Scan day", fontweight="bold")
     axes[2].legend(loc="best", ncol=2)
 
     for ax, centers in zip(axes[:2], [center_32, center_34]):
-        for x, y, text in zip(times, centers, labels):
+        for x, y, text in zip(x_positions, centers, labels):
             ax.annotate(text, (x, y), textcoords="offset points", xytext=(5, 5), fontsize=8, alpha=0.8)
 
-    locator = mdates.AutoDateLocator()
-    formatter = mdates.ConciseDateFormatter(locator)
-    axes[2].xaxis.set_major_locator(locator)
-    axes[2].xaxis.set_major_formatter(formatter)
+    axes[2].set_xticks(tick_positions)
+    axes[2].set_xticklabels(tick_labels)
+    for ax in axes:
+        ax.set_xlim(min(x_positions) - 0.35, max(x_positions) + 0.35)
 
     fig.tight_layout()
     return fig, axes
