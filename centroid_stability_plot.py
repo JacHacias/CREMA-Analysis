@@ -44,6 +44,23 @@ def _build_day_positions(timestamps):
     return np.array(x_positions, dtype=float), tick_positions, tick_labels
 
 
+def _build_scan_labels(labels, timestamps):
+    day_keys = [ts.date().isoformat() for ts in timestamps]
+    counts_by_day = {}
+    for key in day_keys:
+        counts_by_day[key] = counts_by_day.get(key, 0) + 1
+
+    seen_by_day = {}
+    out = []
+    for label, key in zip(labels, day_keys):
+        seen_by_day[key] = seen_by_day.get(key, 0) + 1
+        if counts_by_day[key] == 1:
+            out.append("")
+        else:
+            out.append(f"s{seen_by_day[key]}")
+    return out
+
+
 def parse_centroid_output_blocks(text):
     """
     Parse pasted centroid-output blocks into the format expected by plot_centroid_stability.
@@ -195,6 +212,7 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     )
 
     labels = [item.get("label", _parse_timestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")) for item in entries]
+    point_labels = _build_scan_labels(labels, times)
 
     fig, axes = plt.subplots(
         3,
@@ -210,21 +228,60 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         "markersize": 6,
         "linewidth": 1.2,
     }
+    component_style = {
+        "elinewidth": 1.0,
+        "capsize": 3,
+        "markersize": 4,
+        "linewidth": 0.9,
+        "alpha": 0.75,
+    }
 
     axes[0].errorbar(x_positions, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
-    axes[0].plot(x_positions, center_32 + fit_32, linestyle=":", color="C0", alpha=0.55, label="32S fit contribution")
-    axes[0].plot(x_positions, center_32 - fit_32, linestyle=":", color="C0", alpha=0.55)
-    axes[0].plot(x_positions, center_32 + voltage_32, linestyle="--", color="C0", alpha=0.55, label="32S voltage contribution")
-    axes[0].plot(x_positions, center_32 - voltage_32, linestyle="--", color="C0", alpha=0.55)
+    axes[0].errorbar(
+        x_positions - 0.035,
+        center_32,
+        yerr=fit_32,
+        fmt=".",
+        color="C0",
+        linestyle="none",
+        label="32S fit contribution",
+        **component_style,
+    )
+    axes[0].errorbar(
+        x_positions + 0.035,
+        center_32,
+        yerr=voltage_32,
+        fmt=".",
+        color="C0",
+        linestyle="none",
+        label="32S voltage contribution",
+        **component_style,
+    )
     axes[0].set_ylabel("32S centroid (MHz)", fontweight="bold")
     axes[0].set_title(title, fontweight="bold")
     axes[0].legend(loc="best")
 
     axes[1].errorbar(x_positions, center_34, yerr=total_34, fmt="o-", color="C1", label="34S centroid (total)", **centroid_style)
-    axes[1].plot(x_positions, center_34 + fit_34, linestyle=":", color="C1", alpha=0.55, label="34S fit contribution")
-    axes[1].plot(x_positions, center_34 - fit_34, linestyle=":", color="C1", alpha=0.55)
-    axes[1].plot(x_positions, center_34 + voltage_34, linestyle="--", color="C1", alpha=0.55, label="34S voltage contribution")
-    axes[1].plot(x_positions, center_34 - voltage_34, linestyle="--", color="C1", alpha=0.55)
+    axes[1].errorbar(
+        x_positions - 0.035,
+        center_34,
+        yerr=fit_34,
+        fmt=".",
+        color="C1",
+        linestyle="none",
+        label="34S fit contribution",
+        **component_style,
+    )
+    axes[1].errorbar(
+        x_positions + 0.035,
+        center_34,
+        yerr=voltage_34,
+        fmt=".",
+        color="C1",
+        linestyle="none",
+        label="34S voltage contribution",
+        **component_style,
+    )
     axes[1].set_ylabel("34S centroid (MHz)", fontweight="bold")
     axes[1].legend(loc="best")
 
@@ -239,8 +296,9 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     axes[2].legend(loc="best", ncol=2)
 
     for ax, centers in zip(axes[:2], [center_32, center_34]):
-        for x, y, text in zip(x_positions, centers, labels):
-            ax.annotate(text, (x, y), textcoords="offset points", xytext=(5, 5), fontsize=8, alpha=0.8)
+        for x, y, text in zip(x_positions, centers, point_labels):
+            if text:
+                ax.annotate(text, (x, y), textcoords="offset points", xytext=(4, 4), fontsize=8, alpha=0.85)
 
     axes[2].set_xticks(tick_positions)
     axes[2].set_xticklabels(tick_labels)
