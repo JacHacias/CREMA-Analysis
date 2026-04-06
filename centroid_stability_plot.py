@@ -1,0 +1,248 @@
+from datetime import datetime
+import re
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+GHZ_TO_MHZ = 1000.0
+
+
+def _to_mhz(value_ghz):
+    return float(value_ghz) * GHZ_TO_MHZ
+
+
+def _parse_timestamp(value):
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
+
+
+def parse_centroid_output_blocks(text):
+    """
+    Parse pasted centroid-output blocks into the format expected by plot_centroid_stability.
+
+    Expected block structure resembles:
+        #3/27/26 Data 14:30
+        32S center: -0.109326 +/- 0.051235 GHz
+          fit contribution: 0.003180 GHz
+          voltage contribution: 0.051136 GHz
+        34S center: 0.124142 +/- 0.050042 GHz
+          fit contribution: 0.006557 GHz
+          voltage contribution: 0.049611 GHz
+    """
+    if not text.strip():
+        raise ValueError("text must not be empty.")
+
+    header_re = re.compile(r"^\s*#?\s*(?P<label>.+?)\s*$")
+    center_re = re.compile(r"^\s*(?P<iso>32S|34S)\s+center:\s+(?P<center>[-+0-9.]+)\s+\+/-\s+(?P<total>[-+0-9.]+)\s+GHz\s*$")
+    fit_re = re.compile(r"^\s*fit contribution:\s+(?P<fit>[-+0-9.]+)\s+GHz\s*$")
+    voltage_re = re.compile(r"^\s*voltage contribution:\s+(?P<voltage>[-+0-9.]+)\s+GHz\s*$")
+    timestamp_in_label_re = re.compile(
+        r"(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<year>\d{2,4})(?:\s+(?P<hour>\d{1,2}):(?P<minute>\d{2}))?"
+    )
+
+    entries = []
+    current = None
+    pending_iso = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current and "center_32_GHz" in current and "center_34_GHz" in current:
+                entries.append(current)
+                current = None
+                pending_iso = None
+            continue
+
+        center_match = center_re.match(line)
+        if center_match:
+            if current is None:
+                current = {}
+
+            iso = center_match.group("iso")
+            current[f"center_{iso[:2]}_GHz"] = float(center_match.group("center"))
+            current[f"center_{iso[:2]}_total_unc_GHz"] = float(center_match.group("total"))
+            pending_iso = iso[:2]
+            continue
+
+        fit_match = fit_re.match(line)
+        if fit_match and current is not None and pending_iso is not None:
+            current[f"center_{pending_iso}_fit_unc_GHz"] = float(fit_match.group("fit"))
+            continue
+
+        voltage_match = voltage_re.match(line)
+        if voltage_match and current is not None and pending_iso is not None:
+            current[f"center_{pending_iso}_voltage_unc_GHz"] = float(voltage_match.group("voltage"))
+            continue
+
+        header_match = header_re.match(line)
+        if header_match:
+            if current and "center_32_GHz" in current and "center_34_GHz" in current:
+                entries.append(current)
+            current = {"label": header_match.group("label")}
+            pending_iso = None
+
+            ts_match = timestamp_in_label_re.search(header_match.group("label"))
+            if ts_match:
+                year = int(ts_match.group("year"))
+                if year < 100:
+                    year += 2000
+                hour = int(ts_match.group("hour") or 12)
+                minute = int(ts_match.group("minute") or 0)
+                current["timestamp"] = datetime(
+                    year,
+                    int(ts_match.group("month")),
+                    int(ts_match.group("day")),
+                    hour,
+                    minute,
+                )
+            continue
+
+    if current and "center_32_GHz" in current and "center_34_GHz" in current:
+        entries.append(current)
+
+    if not entries:
+        raise ValueError("No centroid result blocks were parsed from the provided text.")
+
+    for item in entries:
+        if "timestamp" not in item:
+            raise ValueError(f"Could not infer a timestamp from label: {item.get('label', '<missing>')}")
+
+    return entries
+
+
+def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
+    """
+    Plot 32S/34S centroid positions over time in MHz with uncertainty breakdowns.
+
+    Parameters
+    ----------
+    results : list of dict
+        Each dict should contain:
+        - timestamp
+        - label (optional, for annotations)
+        - center_32_GHz
+        - center_32_fit_unc_GHz
+        - center_32_voltage_unc_GHz
+        - center_34_GHz
+        - center_34_fit_unc_GHz
+        - center_34_voltage_unc_GHz
+        Optional:
+        - center_32_total_unc_GHz
+        - center_34_total_unc_GHz
+
+    Returns
+    -------
+    fig, axes
+        Matplotlib figure and axes.
+    """
+    if not results:
+        raise ValueError("results must contain at least one entry.")
+
+    entries = sorted(results, key=lambda item: _parse_timestamp(item["timestamp"]))
+    times = [_parse_timestamp(item["timestamp"]) for item in entries]
+
+    center_32 = np.array([_to_mhz(item["center_32_GHz"]) for item in entries], dtype=float)
+    center_34 = np.array([_to_mhz(item["center_34_GHz"]) for item in entries], dtype=float)
+
+    fit_32 = np.array([_to_mhz(item["center_32_fit_unc_GHz"]) for item in entries], dtype=float)
+    fit_34 = np.array([_to_mhz(item["center_34_fit_unc_GHz"]) for item in entries], dtype=float)
+
+    voltage_32 = np.array([_to_mhz(item["center_32_voltage_unc_GHz"]) for item in entries], dtype=float)
+    voltage_34 = np.array([_to_mhz(item["center_34_voltage_unc_GHz"]) for item in entries], dtype=float)
+
+    total_32 = np.array(
+        [
+            _to_mhz(item.get("center_32_total_unc_GHz", np.hypot(item["center_32_fit_unc_GHz"], item["center_32_voltage_unc_GHz"])))
+            for item in entries
+        ],
+        dtype=float,
+    )
+    total_34 = np.array(
+        [
+            _to_mhz(item.get("center_34_total_unc_GHz", np.hypot(item["center_34_fit_unc_GHz"], item["center_34_voltage_unc_GHz"])))
+            for item in entries
+        ],
+        dtype=float,
+    )
+
+    labels = [item.get("label", _parse_timestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")) for item in entries]
+
+    fig, axes = plt.subplots(
+        3,
+        1,
+        figsize=(12, 10),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1.2, 1.2, 1.0]},
+    )
+
+    centroid_style = {
+        "elinewidth": 1.2,
+        "capsize": 4,
+        "markersize": 6,
+        "linewidth": 1.2,
+    }
+
+    axes[0].errorbar(times, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
+    axes[0].plot(times, center_32 + fit_32, linestyle=":", color="C0", alpha=0.55, label="32S fit contribution")
+    axes[0].plot(times, center_32 - fit_32, linestyle=":", color="C0", alpha=0.55)
+    axes[0].plot(times, center_32 + voltage_32, linestyle="--", color="C0", alpha=0.55, label="32S voltage contribution")
+    axes[0].plot(times, center_32 - voltage_32, linestyle="--", color="C0", alpha=0.55)
+    axes[0].set_ylabel("32S centroid (MHz)", fontweight="bold")
+    axes[0].set_title(title, fontweight="bold")
+    axes[0].legend(loc="best")
+
+    axes[1].errorbar(times, center_34, yerr=total_34, fmt="o-", color="C1", label="34S centroid (total)", **centroid_style)
+    axes[1].plot(times, center_34 + fit_34, linestyle=":", color="C1", alpha=0.55, label="34S fit contribution")
+    axes[1].plot(times, center_34 - fit_34, linestyle=":", color="C1", alpha=0.55)
+    axes[1].plot(times, center_34 + voltage_34, linestyle="--", color="C1", alpha=0.55, label="34S voltage contribution")
+    axes[1].plot(times, center_34 - voltage_34, linestyle="--", color="C1", alpha=0.55)
+    axes[1].set_ylabel("34S centroid (MHz)", fontweight="bold")
+    axes[1].legend(loc="best")
+
+    axes[2].plot(times, fit_32, "o:", color="C0", label="32S fit")
+    axes[2].plot(times, voltage_32, "o--", color="C0", label="32S voltage")
+    axes[2].plot(times, total_32, "o-", color="C0", alpha=0.8, label="32S total")
+    axes[2].plot(times, fit_34, "s:", color="C1", label="34S fit")
+    axes[2].plot(times, voltage_34, "s--", color="C1", label="34S voltage")
+    axes[2].plot(times, total_34, "s-", color="C1", alpha=0.8, label="34S total")
+    axes[2].set_ylabel("Uncertainty (MHz)", fontweight="bold")
+    axes[2].set_xlabel("Timestamp", fontweight="bold")
+    axes[2].legend(loc="best", ncol=2)
+
+    for ax, centers in zip(axes[:2], [center_32, center_34]):
+        for x, y, text in zip(times, centers, labels):
+            ax.annotate(text, (x, y), textcoords="offset points", xytext=(5, 5), fontsize=8, alpha=0.8)
+
+    locator = mdates.AutoDateLocator()
+    formatter = mdates.ConciseDateFormatter(locator)
+    axes[2].xaxis.set_major_locator(locator)
+    axes[2].xaxis.set_major_formatter(formatter)
+
+    fig.tight_layout()
+    return fig, axes
+
+
+if __name__ == "__main__":
+    example_text = """
+    #3/24/26 backup Data
+    32S center: -0.109326 +/- 0.051235 GHz
+      fit contribution: 0.003180 GHz
+      voltage contribution: 0.051136 GHz
+    34S center: 0.124142 +/- 0.050042 GHz
+      fit contribution: 0.006557 GHz
+      voltage contribution: 0.049611 GHz
+
+    #3/27/26 Data
+    32S center: -0.109326 +/- 0.051235 GHz
+      fit contribution: 0.003180 GHz
+      voltage contribution: 0.051136 GHz
+    34S center: 0.124142 +/- 0.050042 GHz
+      fit contribution: 0.006557 GHz
+      voltage contribution: 0.049611 GHz
+    """
+
+    plot_centroid_stability(parse_centroid_output_blocks(example_text))
+    plt.show()
