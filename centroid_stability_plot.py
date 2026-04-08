@@ -81,6 +81,7 @@ def parse_centroid_output_blocks(text):
     center_re = re.compile(r"^\s*(?P<iso>32S|34S)\s+center:\s+(?P<center>[-+0-9.]+)\s+\+/-\s+(?P<total>[-+0-9.]+)\s+GHz\s*$")
     fit_re = re.compile(r"^\s*fit contribution:\s+(?P<fit>[-+0-9.]+)\s+GHz\s*$")
     voltage_re = re.compile(r"^\s*voltage contribution:\s+(?P<voltage>[-+0-9.]+)\s+GHz\s*$")
+    wavemeter_re = re.compile(r"^\s*wavemeter contribution:\s+(?P<wavemeter>[-+0-9.]+)\s+GHz\s*$")
     timestamp_in_label_re = re.compile(
         r"(?P<month>\d{1,2})/(?P<day>\d{1,2})/(?P<year>\d{2,4})(?:\s+(?P<hour>\d{1,2}):(?P<minute>\d{2}))?"
     )
@@ -117,6 +118,11 @@ def parse_centroid_output_blocks(text):
         voltage_match = voltage_re.match(line)
         if voltage_match and current is not None and pending_iso is not None:
             current[f"center_{pending_iso}_voltage_unc_GHz"] = float(voltage_match.group("voltage"))
+            continue
+
+        wavemeter_match = wavemeter_re.match(line)
+        if wavemeter_match and current is not None and pending_iso is not None:
+            current[f"center_{pending_iso}_wavemeter_unc_GHz"] = float(wavemeter_match.group("wavemeter"))
             continue
 
         header_match = header_re.match(line)
@@ -168,9 +174,11 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         - center_32_GHz
         - center_32_fit_unc_GHz
         - center_32_voltage_unc_GHz
+        - center_32_wavemeter_unc_GHz (optional)
         - center_34_GHz
         - center_34_fit_unc_GHz
         - center_34_voltage_unc_GHz
+        - center_34_wavemeter_unc_GHz (optional)
         Optional:
         - center_32_total_unc_GHz
         - center_34_total_unc_GHz
@@ -196,16 +204,43 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     voltage_32 = np.array([_to_mhz(item["center_32_voltage_unc_GHz"]) for item in entries], dtype=float)
     voltage_34 = np.array([_to_mhz(item["center_34_voltage_unc_GHz"]) for item in entries], dtype=float)
 
+    wavemeter_32 = np.array(
+        [_to_mhz(item.get("center_32_wavemeter_unc_GHz", 0.0)) for item in entries],
+        dtype=float,
+    )
+    wavemeter_34 = np.array(
+        [_to_mhz(item.get("center_34_wavemeter_unc_GHz", 0.0)) for item in entries],
+        dtype=float,
+    )
+
     total_32 = np.array(
         [
-            _to_mhz(item.get("center_32_total_unc_GHz", np.hypot(item["center_32_fit_unc_GHz"], item["center_32_voltage_unc_GHz"])))
+            _to_mhz(
+                item.get(
+                    "center_32_total_unc_GHz",
+                    np.sqrt(
+                        item["center_32_fit_unc_GHz"] ** 2
+                        + item["center_32_voltage_unc_GHz"] ** 2
+                        + item.get("center_32_wavemeter_unc_GHz", 0.0) ** 2
+                    ),
+                )
+            )
             for item in entries
         ],
         dtype=float,
     )
     total_34 = np.array(
         [
-            _to_mhz(item.get("center_34_total_unc_GHz", np.hypot(item["center_34_fit_unc_GHz"], item["center_34_voltage_unc_GHz"])))
+            _to_mhz(
+                item.get(
+                    "center_34_total_unc_GHz",
+                    np.sqrt(
+                        item["center_34_fit_unc_GHz"] ** 2
+                        + item["center_34_voltage_unc_GHz"] ** 2
+                        + item.get("center_34_wavemeter_unc_GHz", 0.0) ** 2
+                    ),
+                )
+            )
             for item in entries
         ],
         dtype=float,
@@ -257,6 +292,17 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         label="32S voltage contribution",
         **component_style,
     )
+    if np.any(wavemeter_32 > 0):
+        axes[0].errorbar(
+            x_positions,
+            center_32,
+            yerr=wavemeter_32,
+            fmt="_",
+            color="C4",
+            linestyle="none",
+            label="32S wavemeter contribution",
+            **component_style,
+        )
     axes[0].set_ylabel("32S centroid (MHz)", fontweight="bold")
     axes[0].set_title(title, fontweight="bold")
     axes[0].legend(loc="best")
@@ -282,14 +328,29 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         label="34S voltage contribution",
         **component_style,
     )
+    if np.any(wavemeter_34 > 0):
+        axes[1].errorbar(
+            x_positions,
+            center_34,
+            yerr=wavemeter_34,
+            fmt="_",
+            color="C4",
+            linestyle="none",
+            label="34S wavemeter contribution",
+            **component_style,
+        )
     axes[1].set_ylabel("34S centroid (MHz)", fontweight="bold")
     axes[1].legend(loc="best")
 
     axes[2].plot(x_positions, fit_32, "o:", color="C0", label="32S fit")
     axes[2].plot(x_positions, voltage_32, "o--", color="C0", label="32S voltage")
+    if np.any(wavemeter_32 > 0):
+        axes[2].plot(x_positions, wavemeter_32, "o-.", color="C4", label="32S wavemeter")
     axes[2].plot(x_positions, total_32, "o-", color="C0", alpha=0.8, label="32S total")
     axes[2].plot(x_positions, fit_34, "s:", color="C1", label="34S fit")
     axes[2].plot(x_positions, voltage_34, "s--", color="C1", label="34S voltage")
+    if np.any(wavemeter_34 > 0):
+        axes[2].plot(x_positions, wavemeter_34, "s-.", color="C5", label="34S wavemeter")
     axes[2].plot(x_positions, total_34, "s-", color="C1", alpha=0.8, label="34S total")
     axes[2].set_ylabel("Uncertainty (MHz)", fontweight="bold")
     axes[2].set_xlabel("Scan day", fontweight="bold")
