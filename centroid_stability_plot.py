@@ -408,7 +408,12 @@ def plot_centroid_stability(
     return fig, axes
 
 
-def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"):
+def plot_isotope_shift_stability(
+    results,
+    title="Sulfur Isotope Shift Stability",
+    components=("fit", "voltage", "wavemeter", "total"),
+    show_uncertainty_panel=True,
+):
     """
     Plot 34S-32S isotope shifts by day in MHz with uncertainty breakdowns.
 
@@ -425,6 +430,12 @@ def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"
         - isotope_shift_wavemeter_unc_GHz
         - isotope_shift_total_unc_GHz
 
+    components : tuple of str, optional
+        Which uncertainty terms to include. Valid entries are
+        "fit", "voltage", "wavemeter", and "total".
+    show_uncertainty_panel : bool, optional
+        If True, include the lower panel showing uncertainty magnitudes.
+
     Returns
     -------
     fig, axes
@@ -432,6 +443,14 @@ def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"
     """
     if not results:
         raise ValueError("results must contain at least one entry.")
+
+    valid_components = {"fit", "voltage", "wavemeter", "total"}
+    components = tuple(components)
+    invalid = [name for name in components if name not in valid_components]
+    if invalid:
+        raise ValueError(f"Invalid components {invalid}. Valid options are {sorted(valid_components)}.")
+    if not components:
+        raise ValueError("components must include at least one of 'fit', 'voltage', 'wavemeter', 'total'.")
 
     entries = sorted(results, key=lambda item: _parse_timestamp(item["timestamp"]))
     times = [_parse_timestamp(item["timestamp"]) for item in entries]
@@ -464,13 +483,17 @@ def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"
     labels = [item.get("label", _parse_timestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")) for item in entries]
     point_labels = _build_scan_labels(labels, times)
 
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(12, 8),
-        sharex=True,
-        gridspec_kw={"height_ratios": [1.4, 1.0]},
-    )
+    if show_uncertainty_panel:
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(12, 8),
+            sharex=True,
+            gridspec_kw={"height_ratios": [1.4, 1.0]},
+        )
+    else:
+        fig, axes = plt.subplots(1, 1, figsize=(12, 4.5), sharex=True)
+        axes = np.array([axes])
 
     centroid_style = {
         "elinewidth": 1.2,
@@ -486,36 +509,41 @@ def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"
         "alpha": 0.75,
     }
 
-    axes[0].errorbar(
-        x_positions,
-        shift,
-        yerr=total_unc,
-        fmt="o-",
-        color="C2",
-        label="Isotope shift (total)",
-        **centroid_style,
-    )
-    axes[0].errorbar(
-        x_positions - 0.035,
-        shift,
-        yerr=fit_unc,
-        fmt=".",
-        color="C2",
-        linestyle="none",
-        label="Fit contribution",
-        **component_style,
-    )
-    axes[0].errorbar(
-        x_positions + 0.035,
-        shift,
-        yerr=voltage_unc,
-        fmt=".",
-        color="C3",
-        linestyle="none",
-        label="Voltage contribution",
-        **component_style,
-    )
-    if np.any(wavemeter_unc > 0):
+    if "total" in components:
+        axes[0].errorbar(
+            x_positions,
+            shift,
+            yerr=total_unc,
+            fmt="o-",
+            color="C2",
+            label="Isotope shift (total)",
+            **centroid_style,
+        )
+    else:
+        axes[0].plot(x_positions, shift, "o-", color="C2", label="Isotope shift")
+    if "fit" in components:
+        axes[0].errorbar(
+            x_positions - 0.035,
+            shift,
+            yerr=fit_unc,
+            fmt=".",
+            color="C2",
+            linestyle="none",
+            label="Fit contribution",
+            **component_style,
+        )
+    if "voltage" in components:
+        axes[0].errorbar(
+            x_positions + 0.035,
+            shift,
+            yerr=voltage_unc,
+            fmt=".",
+            color="C3",
+            linestyle="none",
+            label="Voltage contribution",
+            **component_style,
+        )
+    if "wavemeter" in components and np.any(wavemeter_unc > 0):
         axes[0].errorbar(
             x_positions + 0.070,
             shift,
@@ -530,21 +558,26 @@ def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"
     axes[0].set_title(title, fontweight="bold")
     axes[0].legend(loc="best")
 
-    axes[1].plot(x_positions, fit_unc, "o:", color="C2", label="Fit")
-    axes[1].plot(x_positions, voltage_unc, "o--", color="C3", label="Voltage")
-    if np.any(wavemeter_unc > 0):
-        axes[1].plot(x_positions, wavemeter_unc, "o-.", color="C4", label="Wavemeter")
-    axes[1].plot(x_positions, total_unc, "o-", color="C2", alpha=0.8, label="Total")
-    axes[1].set_ylabel("Uncertainty (MHz)", fontweight="bold")
-    axes[1].set_xlabel("Scan day", fontweight="bold")
-    axes[1].legend(loc="best", ncol=2)
+    if show_uncertainty_panel:
+        if "fit" in components:
+            axes[1].plot(x_positions, fit_unc, "o:", color="C2", label="Fit")
+        if "voltage" in components:
+            axes[1].plot(x_positions, voltage_unc, "o--", color="C3", label="Voltage")
+        if "wavemeter" in components and np.any(wavemeter_unc > 0):
+            axes[1].plot(x_positions, wavemeter_unc, "o-.", color="C4", label="Wavemeter")
+        if "total" in components:
+            axes[1].plot(x_positions, total_unc, "o-", color="C2", alpha=0.8, label="Total")
+        axes[1].set_ylabel("Uncertainty (MHz)", fontweight="bold")
+        axes[1].set_xlabel("Scan day", fontweight="bold")
+        axes[1].legend(loc="best", ncol=2)
 
     for x, y, text in zip(x_positions, shift, point_labels):
         if text:
             axes[0].annotate(text, (x, y), textcoords="offset points", xytext=(4, 4), fontsize=8, alpha=0.85)
 
-    axes[1].set_xticks(tick_positions)
-    axes[1].set_xticklabels(tick_labels)
+    axes[-1].set_xticks(tick_positions)
+    axes[-1].set_xticklabels(tick_labels)
+    axes[-1].set_xlabel("Scan day", fontweight="bold")
     for ax in axes:
         ax.set_xlim(min(x_positions) - 0.35, max(x_positions) + 0.35)
 
