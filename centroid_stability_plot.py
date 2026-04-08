@@ -294,10 +294,10 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     )
     if np.any(wavemeter_32 > 0):
         axes[0].errorbar(
-            x_positions,
+            x_positions + 0.070,
             center_32,
             yerr=wavemeter_32,
-            fmt="_",
+            fmt=".",
             color="C4",
             linestyle="none",
             label="32S wavemeter contribution",
@@ -330,11 +330,11 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     )
     if np.any(wavemeter_34 > 0):
         axes[1].errorbar(
-            x_positions,
+            x_positions + 0.070,
             center_34,
             yerr=wavemeter_34,
-            fmt="_",
-            color="C4",
+            fmt=".",
+            color="C5",
             linestyle="none",
             label="34S wavemeter contribution",
             **component_style,
