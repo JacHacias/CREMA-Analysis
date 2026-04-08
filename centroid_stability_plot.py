@@ -292,6 +292,9 @@ def plot_centroid_stability(
         "linewidth": 0.9,
         "alpha": 0.75,
     }
+    fit_offset = 0.0 if components == ("fit",) else -0.035
+    voltage_offset = 0.035
+    wavemeter_offset = 0.070
 
     if "total" in components:
         axes[0].errorbar(x_positions, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
@@ -299,7 +302,7 @@ def plot_centroid_stability(
         axes[0].plot(x_positions, center_32, "o-", color="C0", label="32S centroid")
     if "fit" in components:
         axes[0].errorbar(
-            x_positions - 0.035,
+            x_positions + fit_offset,
             center_32,
             yerr=fit_32,
             fmt=".",
@@ -310,7 +313,7 @@ def plot_centroid_stability(
         )
     if "voltage" in components:
         axes[0].errorbar(
-            x_positions + 0.035,
+            x_positions + voltage_offset,
             center_32,
             yerr=voltage_32,
             fmt=".",
@@ -321,7 +324,7 @@ def plot_centroid_stability(
         )
     if "wavemeter" in components and np.any(wavemeter_32 > 0):
         axes[0].errorbar(
-            x_positions + 0.070,
+            x_positions + wavemeter_offset,
             center_32,
             yerr=wavemeter_32,
             fmt=".",
@@ -340,7 +343,7 @@ def plot_centroid_stability(
         axes[1].plot(x_positions, center_34, "o-", color="C1", label="34S centroid")
     if "fit" in components:
         axes[1].errorbar(
-            x_positions - 0.035,
+            x_positions + fit_offset,
             center_34,
             yerr=fit_34,
             fmt=".",
@@ -351,7 +354,7 @@ def plot_centroid_stability(
         )
     if "voltage" in components:
         axes[1].errorbar(
-            x_positions + 0.035,
+            x_positions + voltage_offset,
             center_34,
             yerr=voltage_34,
             fmt=".",
@@ -362,7 +365,7 @@ def plot_centroid_stability(
         )
     if "wavemeter" in components and np.any(wavemeter_34 > 0):
         axes[1].errorbar(
-            x_positions + 0.070,
+            x_positions + wavemeter_offset,
             center_34,
             yerr=wavemeter_34,
             fmt=".",
@@ -508,6 +511,9 @@ def plot_isotope_shift_stability(
         "linewidth": 0.9,
         "alpha": 0.75,
     }
+    fit_offset = 0.0 if components == ("fit",) else -0.035
+    voltage_offset = 0.035
+    wavemeter_offset = 0.070
 
     if "total" in components:
         axes[0].errorbar(
@@ -523,7 +529,7 @@ def plot_isotope_shift_stability(
         axes[0].plot(x_positions, shift, "o-", color="C2", label="Isotope shift")
     if "fit" in components:
         axes[0].errorbar(
-            x_positions - 0.035,
+            x_positions + fit_offset,
             shift,
             yerr=fit_unc,
             fmt=".",
@@ -534,7 +540,7 @@ def plot_isotope_shift_stability(
         )
     if "voltage" in components:
         axes[0].errorbar(
-            x_positions + 0.035,
+            x_positions + voltage_offset,
             shift,
             yerr=voltage_unc,
             fmt=".",
@@ -545,7 +551,7 @@ def plot_isotope_shift_stability(
         )
     if "wavemeter" in components and np.any(wavemeter_unc > 0):
         axes[0].errorbar(
-            x_positions + 0.070,
+            x_positions + wavemeter_offset,
             shift,
             yerr=wavemeter_unc,
             fmt=".",
