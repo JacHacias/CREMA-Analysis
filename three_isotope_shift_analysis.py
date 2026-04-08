@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import satlas2
 from scipy.ndimage import gaussian_filter1d
+from scipy.special import wofz
 
 
 C = 299792458.0
@@ -9,17 +10,25 @@ E_CHARGE = 1.602176634e-19
 AMU = 1.66053906660e-27
 
 
-def gaussian(x, A, x0, sigma, y0):
-    return A * np.exp(-0.5 * ((x - x0) / sigma) ** 2) + y0
+def voigt(x, amplitude, center, sigma_g, gamma_l, background):
+    sigma_g = max(float(sigma_g), 1e-12)
+    gamma_l = max(float(gamma_l), 1e-12)
+    z = ((np.asarray(x, dtype=float) - center) + 1j * gamma_l) / (sigma_g * np.sqrt(2.0))
+    profile = np.real(wofz(z)) / (sigma_g * np.sqrt(2.0 * np.pi))
+    peak = np.max(profile)
+    if not np.isfinite(peak) or peak <= 0:
+        return np.full_like(np.asarray(x, dtype=float), background, dtype=float)
+    return amplitude * (profile / peak) + background
 
 
-class GaussianModel(satlas2.Model):
-    def __init__(self, amplitude, center, sigma, background, name="Gaussian", prefunc=None):
+class VoigtModel(satlas2.Model):
+    def __init__(self, amplitude, center, sigma_g, gamma_l, background, name="Voigt", prefunc=None):
         super().__init__(name, prefunc=prefunc)
         self.params = {
             "amplitude": satlas2.Parameter(value=amplitude, min=0.0, max=np.inf, vary=True),
             "center": satlas2.Parameter(value=center, vary=True),
-            "sigma": satlas2.Parameter(value=sigma, min=1e-12, max=np.inf, vary=True),
+            "sigma_g": satlas2.Parameter(value=sigma_g, min=1e-12, max=np.inf, vary=True),
+            "gamma_l": satlas2.Parameter(value=gamma_l, min=1e-12, max=np.inf, vary=True),
             "background": satlas2.Parameter(value=background, vary=True),
         }
 
@@ -27,9 +36,10 @@ class GaussianModel(satlas2.Model):
         x = self.transform(x)
         amplitude = self.params["amplitude"].value
         center = self.params["center"].value
-        sigma = self.params["sigma"].value
+        sigma_g = self.params["sigma_g"].value
+        gamma_l = self.params["gamma_l"].value
         background = self.params["background"].value
-        return gaussian(x, amplitude, center, sigma, background)
+        return voigt(x, amplitude, center, sigma_g, gamma_l, background)
 
 
 def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, geometry="collinear"):
@@ -85,18 +95,22 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
         sigma_guess = max((x[i_right] - x[i_left]) / 2.355, 1e-3)
     else:
         sigma_guess = max((x_fit.max() - x_fit.min()) / 6, 1e-3)
+    gamma_guess = max(0.5 * sigma_guess, 1e-3)
     yerr = np.sqrt(y_fit)
     yerr[yerr <= 0] = 1.0
 
-    model = GaussianModel(A_guess, x0_guess, sigma_guess, y0_guess)
+    model = VoigtModel(A_guess, x0_guess, sigma_guess, gamma_guess, y0_guess)
     model.params["center"].min = x_fit.min()
     model.params["center"].max = x_fit.max()
     if len(x_fit) > 1:
         dx = abs(x_fit[1] - x_fit[0])
     else:
         dx = 1e-3
-    model.params["sigma"].min = max(dx / 2.0, 1e-3)
-    model.params["sigma"].max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
+    width_max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
+    model.params["sigma_g"].min = max(dx / 2.0, 1e-3)
+    model.params["sigma_g"].max = width_max
+    model.params["gamma_l"].min = max(dx / 2.0, 1e-3)
+    model.params["gamma_l"].max = width_max
     model.params["background"].min = 0.0
     model.params["background"].max = max(np.max(y_fit), 1.0)
 
@@ -112,7 +126,8 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
         [
             params["amplitude"].value,
             params["center"].value,
-            params["sigma"].value,
+            params["sigma_g"].value,
+            params["gamma_l"].value,
             params["background"].value,
         ],
         dtype=float,
@@ -121,7 +136,8 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
         [
             getattr(params["amplitude"], "unc", np.nan),
             getattr(params["center"], "unc", np.nan),
-            getattr(params["sigma"], "unc", np.nan),
+            getattr(params["sigma_g"], "unc", np.nan),
+            getattr(params["gamma_l"], "unc", np.nan),
             getattr(params["background"], "unc", np.nan),
         ],
         dtype=float,
@@ -377,7 +393,7 @@ def plot_three_isotopes_fit(
 
     for ax, res, label, color in plot_info:
         xfit = np.linspace(res["centers"].min(), res["centers"].max(), 2000)
-        yfit = gaussian(xfit, *res["fit_params"])
+        yfit = voigt(xfit, *res["fit_params"])
 
         ax.step(res["centers"], res["counts"], where="mid", color=color, alpha=0.75, label=label)
         ax.plot(xfit, yfit, color=color, lw=2)

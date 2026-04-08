@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import satlas2
 from scipy.ndimage import gaussian_filter1d
+from scipy.special import wofz
 
 
 C = 299792458.0
@@ -9,17 +10,25 @@ E_CHARGE = 1.602176634e-19
 AMU = 1.66053906660e-27
 
 
-def gaussian(x, amplitude, center, sigma, background):
-    return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2) + background
+def voigt(x, amplitude, center, sigma_g, gamma_l, background):
+    sigma_g = max(float(sigma_g), 1e-12)
+    gamma_l = max(float(gamma_l), 1e-12)
+    z = ((np.asarray(x, dtype=float) - center) + 1j * gamma_l) / (sigma_g * np.sqrt(2.0))
+    profile = np.real(wofz(z)) / (sigma_g * np.sqrt(2.0 * np.pi))
+    peak = np.max(profile)
+    if not np.isfinite(peak) or peak <= 0:
+        return np.full_like(np.asarray(x, dtype=float), background, dtype=float)
+    return amplitude * (profile / peak) + background
 
 
-class GaussianModel(satlas2.Model):
-    def __init__(self, amplitude, center, sigma, background, name="Gaussian", prefunc=None):
+class VoigtModel(satlas2.Model):
+    def __init__(self, amplitude, center, sigma_g, gamma_l, background, name="Voigt", prefunc=None):
         super().__init__(name, prefunc=prefunc)
         self.params = {
             "amplitude": satlas2.Parameter(value=amplitude, min=0.0, max=np.inf, vary=True),
             "center": satlas2.Parameter(value=center, vary=True),
-            "sigma": satlas2.Parameter(value=sigma, min=1e-12, max=np.inf, vary=True),
+            "sigma_g": satlas2.Parameter(value=sigma_g, min=1e-12, max=np.inf, vary=True),
+            "gamma_l": satlas2.Parameter(value=gamma_l, min=1e-12, max=np.inf, vary=True),
             "background": satlas2.Parameter(value=background, vary=True),
         }
 
@@ -27,9 +36,10 @@ class GaussianModel(satlas2.Model):
         x = self.transform(x)
         amplitude = self.params["amplitude"].value
         center = self.params["center"].value
-        sigma = self.params["sigma"].value
+        sigma_g = self.params["sigma_g"].value
+        gamma_l = self.params["gamma_l"].value
         background = self.params["background"].value
-        return gaussian(x, amplitude, center, sigma, background)
+        return voigt(x, amplitude, center, sigma_g, gamma_l, background)
 
 
 def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, geometry="collinear"):
@@ -86,18 +96,22 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
         sigma_guess = max((x[i_right] - x[i_left]) / 2.355, 1e-3)
     else:
         sigma_guess = max((x_fit.max() - x_fit.min()) / 6.0, 1e-3)
+    gamma_guess = max(0.5 * sigma_guess, 1e-3)
     yerr = np.sqrt(y_fit)
     yerr[yerr <= 0] = 1.0
 
-    model = GaussianModel(amplitude_guess, center_guess, sigma_guess, background_guess)
+    model = VoigtModel(amplitude_guess, center_guess, sigma_guess, gamma_guess, background_guess)
     model.params["center"].min = x_fit.min()
     model.params["center"].max = x_fit.max()
     if len(x_fit) > 1:
         dx = abs(x_fit[1] - x_fit[0])
     else:
         dx = 1e-3
-    model.params["sigma"].min = max(dx / 2.0, 1e-3)
-    model.params["sigma"].max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
+    width_max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
+    model.params["sigma_g"].min = max(dx / 2.0, 1e-3)
+    model.params["sigma_g"].max = width_max
+    model.params["gamma_l"].min = max(dx / 2.0, 1e-3)
+    model.params["gamma_l"].max = width_max
     model.params["background"].min = 0.0
     model.params["background"].max = max(np.max(y_fit), 1.0)
 
@@ -113,7 +127,8 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
         [
             params["amplitude"].value,
             params["center"].value,
-            params["sigma"].value,
+            params["sigma_g"].value,
+            params["gamma_l"].value,
             params["background"].value,
         ],
         dtype=float,
@@ -122,7 +137,8 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
         [
             getattr(params["amplitude"], "unc", np.nan),
             getattr(params["center"], "unc", np.nan),
-            getattr(params["sigma"], "unc", np.nan),
+            getattr(params["sigma_g"], "unc", np.nan),
+            getattr(params["gamma_l"], "unc", np.nan),
             getattr(params["background"], "unc", np.nan),
         ],
         dtype=float,
@@ -292,7 +308,7 @@ def plot_two_isotopes_fit(
     label2="34S",
 ):
     """
-    Compare two gated isotope spectra with Doppler correction and simple Gaussian fits.
+    Compare two gated isotope spectra with Doppler correction and simple Voigt fits.
 
     Returns fit centers and uncertainties for each isotope and the propagated isotope shift.
     """
@@ -356,8 +372,8 @@ def plot_two_isotopes_fit(
 
     xfit1 = np.linspace(centers1.min(), centers1.max(), 2000)
     xfit2 = np.linspace(centers2.min(), centers2.max(), 2000)
-    yfit1 = gaussian(xfit1, *p1)
-    yfit2 = gaussian(xfit2, *p2)
+    yfit1 = voigt(xfit1, *p1)
+    yfit2 = voigt(xfit2, *p2)
     xlim1 = _occupied_xlim(centers1, counts1, x1, include_points=[center1, 0.0])
     xlim2 = _occupied_xlim(centers2, counts2, x2, include_points=[center2, 0.0])
     x_left = min(xlim1[0], xlim2[0])

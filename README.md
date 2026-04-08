@@ -5,7 +5,7 @@ Utilities and notebooks for sulfur isotope analysis, including Doppler-corrected
 ## Files
 
 - `isotope_shift_analysis.py`
-  Two-isotope comparison with Doppler correction, Gaussian peak fitting, panel plots, and propagated fit/HV uncertainties.
+  Two-isotope comparison with Doppler correction, Voigt peak fitting, panel plots, and propagated fit/HV uncertainties.
 - `three_isotope_shift_analysis.py`
   Three-isotope comparison for `32S`, `34S`, and `36S` with separate panels and shifts reported relative to `32S`.
 - `Sulfur_plotting.ipynb`
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import satlas2
 ```
 
-`satlas2` provides the Gaussian fitting used in the isotope-shift scripts. Install it with `pip install satlas2`.
+`satlas2` provides the Voigt fitting used in the isotope-shift scripts. Install it with `pip install satlas2`.
 
 ## Two-Isotope Example
 
