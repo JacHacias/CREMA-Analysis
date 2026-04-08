@@ -161,7 +161,12 @@ def parse_centroid_output_blocks(text):
     return entries
 
 
-def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
+def plot_centroid_stability(
+    results,
+    title="Sulfur Centroid Stability",
+    components=("fit", "voltage", "wavemeter", "total"),
+    show_uncertainty_panel=True,
+):
     """
     Plot 32S/34S centroid positions by day in MHz with uncertainty breakdowns.
 
@@ -183,6 +188,12 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         - center_32_total_unc_GHz
         - center_34_total_unc_GHz
 
+    components : tuple of str, optional
+        Which uncertainty terms to include. Valid entries are
+        "fit", "voltage", "wavemeter", and "total".
+    show_uncertainty_panel : bool, optional
+        If True, include the lower panel showing uncertainty magnitudes.
+
     Returns
     -------
     fig, axes
@@ -190,6 +201,14 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     """
     if not results:
         raise ValueError("results must contain at least one entry.")
+
+    valid_components = {"fit", "voltage", "wavemeter", "total"}
+    components = tuple(components)
+    invalid = [name for name in components if name not in valid_components]
+    if invalid:
+        raise ValueError(f"Invalid components {invalid}. Valid options are {sorted(valid_components)}.")
+    if not components:
+        raise ValueError("components must include at least one of 'fit', 'voltage', 'wavemeter', 'total'.")
 
     entries = sorted(results, key=lambda item: _parse_timestamp(item["timestamp"]))
     times = [_parse_timestamp(item["timestamp"]) for item in entries]
@@ -249,12 +268,208 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
     labels = [item.get("label", _parse_timestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")) for item in entries]
     point_labels = _build_scan_labels(labels, times)
 
+    if show_uncertainty_panel:
+        fig, axes = plt.subplots(
+            3,
+            1,
+            figsize=(12, 10),
+            sharex=True,
+            gridspec_kw={"height_ratios": [1.2, 1.2, 1.0]},
+        )
+    else:
+        fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+
+    centroid_style = {
+        "elinewidth": 1.2,
+        "capsize": 4,
+        "markersize": 6,
+        "linewidth": 1.2,
+    }
+    component_style = {
+        "elinewidth": 1.0,
+        "capsize": 3,
+        "markersize": 4,
+        "linewidth": 0.9,
+        "alpha": 0.75,
+    }
+
+    if "total" in components:
+        axes[0].errorbar(x_positions, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
+    else:
+        axes[0].plot(x_positions, center_32, "o-", color="C0", label="32S centroid")
+    if "fit" in components:
+        axes[0].errorbar(
+            x_positions - 0.035,
+            center_32,
+            yerr=fit_32,
+            fmt=".",
+            color="C0",
+            linestyle="none",
+            label="32S fit contribution",
+            **component_style,
+        )
+    if "voltage" in components:
+        axes[0].errorbar(
+            x_positions + 0.035,
+            center_32,
+            yerr=voltage_32,
+            fmt=".",
+            color="C0",
+            linestyle="none",
+            label="32S voltage contribution",
+            **component_style,
+        )
+    if "wavemeter" in components and np.any(wavemeter_32 > 0):
+        axes[0].errorbar(
+            x_positions + 0.070,
+            center_32,
+            yerr=wavemeter_32,
+            fmt=".",
+            color="C4",
+            linestyle="none",
+            label="32S wavemeter contribution",
+            **component_style,
+        )
+    axes[0].set_ylabel("32S centroid (MHz)", fontweight="bold")
+    axes[0].set_title(title, fontweight="bold")
+    axes[0].legend(loc="best")
+
+    if "total" in components:
+        axes[1].errorbar(x_positions, center_34, yerr=total_34, fmt="o-", color="C1", label="34S centroid (total)", **centroid_style)
+    else:
+        axes[1].plot(x_positions, center_34, "o-", color="C1", label="34S centroid")
+    if "fit" in components:
+        axes[1].errorbar(
+            x_positions - 0.035,
+            center_34,
+            yerr=fit_34,
+            fmt=".",
+            color="C1",
+            linestyle="none",
+            label="34S fit contribution",
+            **component_style,
+        )
+    if "voltage" in components:
+        axes[1].errorbar(
+            x_positions + 0.035,
+            center_34,
+            yerr=voltage_34,
+            fmt=".",
+            color="C1",
+            linestyle="none",
+            label="34S voltage contribution",
+            **component_style,
+        )
+    if "wavemeter" in components and np.any(wavemeter_34 > 0):
+        axes[1].errorbar(
+            x_positions + 0.070,
+            center_34,
+            yerr=wavemeter_34,
+            fmt=".",
+            color="C5",
+            linestyle="none",
+            label="34S wavemeter contribution",
+            **component_style,
+        )
+    axes[1].set_ylabel("34S centroid (MHz)", fontweight="bold")
+    axes[1].legend(loc="best")
+
+    if show_uncertainty_panel:
+        axes[2].plot(x_positions, fit_32, "o:", color="C0", label="32S fit")
+        if "voltage" in components:
+            axes[2].plot(x_positions, voltage_32, "o--", color="C0", label="32S voltage")
+        if "wavemeter" in components and np.any(wavemeter_32 > 0):
+            axes[2].plot(x_positions, wavemeter_32, "o-.", color="C4", label="32S wavemeter")
+        if "total" in components:
+            axes[2].plot(x_positions, total_32, "o-", color="C0", alpha=0.8, label="32S total")
+        axes[2].plot(x_positions, fit_34, "s:", color="C1", label="34S fit")
+        if "voltage" in components:
+            axes[2].plot(x_positions, voltage_34, "s--", color="C1", label="34S voltage")
+        if "wavemeter" in components and np.any(wavemeter_34 > 0):
+            axes[2].plot(x_positions, wavemeter_34, "s-.", color="C5", label="34S wavemeter")
+        if "total" in components:
+            axes[2].plot(x_positions, total_34, "s-", color="C1", alpha=0.8, label="34S total")
+        axes[2].set_ylabel("Uncertainty (MHz)", fontweight="bold")
+        axes[2].set_xlabel("Scan day", fontweight="bold")
+        axes[2].legend(loc="best", ncol=2)
+
+    for ax, centers in zip(axes[:2], [center_32, center_34]):
+        for x, y, text in zip(x_positions, centers, point_labels):
+            if text:
+                ax.annotate(text, (x, y), textcoords="offset points", xytext=(4, 4), fontsize=8, alpha=0.85)
+
+    axes[-1].set_xticks(tick_positions)
+    axes[-1].set_xticklabels(tick_labels)
+    axes[-1].set_xlabel("Scan day", fontweight="bold")
+    for ax in axes:
+        ax.set_xlim(min(x_positions) - 0.35, max(x_positions) + 0.35)
+
+    fig.tight_layout()
+    return fig, axes
+
+
+def plot_isotope_shift_stability(results, title="Sulfur Isotope Shift Stability"):
+    """
+    Plot 34S-32S isotope shifts by day in MHz with uncertainty breakdowns.
+
+    Parameters
+    ----------
+    results : list of dict
+        Each dict should contain:
+        - timestamp
+        - label (optional, for annotations)
+        - isotope_shift_GHz
+        - isotope_shift_fit_unc_GHz
+        - isotope_shift_voltage_unc_GHz
+        Optional:
+        - isotope_shift_wavemeter_unc_GHz
+        - isotope_shift_total_unc_GHz
+
+    Returns
+    -------
+    fig, axes
+        Matplotlib figure and axes.
+    """
+    if not results:
+        raise ValueError("results must contain at least one entry.")
+
+    entries = sorted(results, key=lambda item: _parse_timestamp(item["timestamp"]))
+    times = [_parse_timestamp(item["timestamp"]) for item in entries]
+    x_positions, tick_positions, tick_labels = _build_day_positions(times)
+
+    shift = np.array([_to_mhz(item["isotope_shift_GHz"]) for item in entries], dtype=float)
+    fit_unc = np.array([_to_mhz(item["isotope_shift_fit_unc_GHz"]) for item in entries], dtype=float)
+    voltage_unc = np.array([_to_mhz(item["isotope_shift_voltage_unc_GHz"]) for item in entries], dtype=float)
+    wavemeter_unc = np.array(
+        [_to_mhz(item.get("isotope_shift_wavemeter_unc_GHz", 0.0)) for item in entries],
+        dtype=float,
+    )
+    total_unc = np.array(
+        [
+            _to_mhz(
+                item.get(
+                    "isotope_shift_total_unc_GHz",
+                    np.sqrt(
+                        item["isotope_shift_fit_unc_GHz"] ** 2
+                        + item["isotope_shift_voltage_unc_GHz"] ** 2
+                        + item.get("isotope_shift_wavemeter_unc_GHz", 0.0) ** 2
+                    ),
+                )
+            )
+            for item in entries
+        ],
+        dtype=float,
+    )
+
+    labels = [item.get("label", _parse_timestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")) for item in entries]
+    point_labels = _build_scan_labels(labels, times)
+
     fig, axes = plt.subplots(
-        3,
+        2,
         1,
-        figsize=(12, 10),
+        figsize=(12, 8),
         sharex=True,
-        gridspec_kw={"height_ratios": [1.2, 1.2, 1.0]},
+        gridspec_kw={"height_ratios": [1.4, 1.0]},
     )
 
     centroid_style = {
@@ -271,98 +486,65 @@ def plot_centroid_stability(results, title="Sulfur Centroid Stability"):
         "alpha": 0.75,
     }
 
-    axes[0].errorbar(x_positions, center_32, yerr=total_32, fmt="o-", color="C0", label="32S centroid (total)", **centroid_style)
+    axes[0].errorbar(
+        x_positions,
+        shift,
+        yerr=total_unc,
+        fmt="o-",
+        color="C2",
+        label="Isotope shift (total)",
+        **centroid_style,
+    )
     axes[0].errorbar(
         x_positions - 0.035,
-        center_32,
-        yerr=fit_32,
+        shift,
+        yerr=fit_unc,
         fmt=".",
-        color="C0",
+        color="C2",
         linestyle="none",
-        label="32S fit contribution",
+        label="Fit contribution",
         **component_style,
     )
     axes[0].errorbar(
         x_positions + 0.035,
-        center_32,
-        yerr=voltage_32,
+        shift,
+        yerr=voltage_unc,
         fmt=".",
-        color="C0",
+        color="C3",
         linestyle="none",
-        label="32S voltage contribution",
+        label="Voltage contribution",
         **component_style,
     )
-    if np.any(wavemeter_32 > 0):
+    if np.any(wavemeter_unc > 0):
         axes[0].errorbar(
             x_positions + 0.070,
-            center_32,
-            yerr=wavemeter_32,
+            shift,
+            yerr=wavemeter_unc,
             fmt=".",
             color="C4",
             linestyle="none",
-            label="32S wavemeter contribution",
+            label="Wavemeter contribution",
             **component_style,
         )
-    axes[0].set_ylabel("32S centroid (MHz)", fontweight="bold")
+    axes[0].set_ylabel("Shift (MHz)", fontweight="bold")
     axes[0].set_title(title, fontweight="bold")
     axes[0].legend(loc="best")
 
-    axes[1].errorbar(x_positions, center_34, yerr=total_34, fmt="o-", color="C1", label="34S centroid (total)", **centroid_style)
-    axes[1].errorbar(
-        x_positions - 0.035,
-        center_34,
-        yerr=fit_34,
-        fmt=".",
-        color="C1",
-        linestyle="none",
-        label="34S fit contribution",
-        **component_style,
-    )
-    axes[1].errorbar(
-        x_positions + 0.035,
-        center_34,
-        yerr=voltage_34,
-        fmt=".",
-        color="C1",
-        linestyle="none",
-        label="34S voltage contribution",
-        **component_style,
-    )
-    if np.any(wavemeter_34 > 0):
-        axes[1].errorbar(
-            x_positions + 0.070,
-            center_34,
-            yerr=wavemeter_34,
-            fmt=".",
-            color="C5",
-            linestyle="none",
-            label="34S wavemeter contribution",
-            **component_style,
-        )
-    axes[1].set_ylabel("34S centroid (MHz)", fontweight="bold")
-    axes[1].legend(loc="best")
+    axes[1].plot(x_positions, fit_unc, "o:", color="C2", label="Fit")
+    axes[1].plot(x_positions, voltage_unc, "o--", color="C3", label="Voltage")
+    if np.any(wavemeter_unc > 0):
+        axes[1].plot(x_positions, wavemeter_unc, "o-.", color="C4", label="Wavemeter")
+    axes[1].plot(x_positions, total_unc, "o-", color="C2", alpha=0.8, label="Total")
+    axes[1].set_ylabel("Uncertainty (MHz)", fontweight="bold")
+    axes[1].set_xlabel("Scan day", fontweight="bold")
+    axes[1].legend(loc="best", ncol=2)
 
-    axes[2].plot(x_positions, fit_32, "o:", color="C0", label="32S fit")
-    axes[2].plot(x_positions, voltage_32, "o--", color="C0", label="32S voltage")
-    if np.any(wavemeter_32 > 0):
-        axes[2].plot(x_positions, wavemeter_32, "o-.", color="C4", label="32S wavemeter")
-    axes[2].plot(x_positions, total_32, "o-", color="C0", alpha=0.8, label="32S total")
-    axes[2].plot(x_positions, fit_34, "s:", color="C1", label="34S fit")
-    axes[2].plot(x_positions, voltage_34, "s--", color="C1", label="34S voltage")
-    if np.any(wavemeter_34 > 0):
-        axes[2].plot(x_positions, wavemeter_34, "s-.", color="C5", label="34S wavemeter")
-    axes[2].plot(x_positions, total_34, "s-", color="C1", alpha=0.8, label="34S total")
-    axes[2].set_ylabel("Uncertainty (MHz)", fontweight="bold")
-    axes[2].set_xlabel("Scan day", fontweight="bold")
-    axes[2].legend(loc="best", ncol=2)
+    for x, y, text in zip(x_positions, shift, point_labels):
+        if text:
+            axes[0].annotate(text, (x, y), textcoords="offset points", xytext=(4, 4), fontsize=8, alpha=0.85)
 
-    for ax, centers in zip(axes[:2], [center_32, center_34]):
-        for x, y, text in zip(x_positions, centers, point_labels):
-            if text:
-                ax.annotate(text, (x, y), textcoords="offset points", xytext=(4, 4), fontsize=8, alpha=0.85)
-
-    axes[2].set_xticks(tick_positions)
-    axes[2].set_xticklabels(tick_labels)
+    axes[1].set_xticks(tick_positions)
+    axes[1].set_xticklabels(tick_labels)
     for ax in axes:
         ax.set_xlim(min(x_positions) - 0.35, max(x_positions) + 0.35)
 
