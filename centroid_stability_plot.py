@@ -220,8 +220,14 @@ def plot_centroid_stability(
     fit_32 = np.array([_to_mhz(item["center_32_fit_unc_GHz"]) for item in entries], dtype=float)
     fit_34 = np.array([_to_mhz(item["center_34_fit_unc_GHz"]) for item in entries], dtype=float)
 
-    voltage_32 = np.array([_to_mhz(item["center_32_voltage_unc_GHz"]) for item in entries], dtype=float)
-    voltage_34 = np.array([_to_mhz(item["center_34_voltage_unc_GHz"]) for item in entries], dtype=float)
+    voltage_32 = np.array(
+        [_to_mhz(item.get("center_32_voltage_unc_GHz", 0.0)) for item in entries],
+        dtype=float,
+    )
+    voltage_34 = np.array(
+        [_to_mhz(item.get("center_34_voltage_unc_GHz", 0.0)) for item in entries],
+        dtype=float,
+    )
 
     wavemeter_32 = np.array(
         [_to_mhz(item.get("center_32_wavemeter_unc_GHz", 0.0)) for item in entries],
@@ -239,7 +245,7 @@ def plot_centroid_stability(
                     "center_32_total_unc_GHz",
                     np.sqrt(
                         item["center_32_fit_unc_GHz"] ** 2
-                        + item["center_32_voltage_unc_GHz"] ** 2
+                        + item.get("center_32_voltage_unc_GHz", 0.0) ** 2
                         + item.get("center_32_wavemeter_unc_GHz", 0.0) ** 2
                     ),
                 )
@@ -255,7 +261,7 @@ def plot_centroid_stability(
                     "center_34_total_unc_GHz",
                     np.sqrt(
                         item["center_34_fit_unc_GHz"] ** 2
-                        + item["center_34_voltage_unc_GHz"] ** 2
+                        + item.get("center_34_voltage_unc_GHz", 0.0) ** 2
                         + item.get("center_34_wavemeter_unc_GHz", 0.0) ** 2
                     ),
                 )
@@ -461,7 +467,10 @@ def plot_isotope_shift_stability(
 
     shift = np.array([_to_mhz(item["isotope_shift_GHz"]) for item in entries], dtype=float)
     fit_unc = np.array([_to_mhz(item["isotope_shift_fit_unc_GHz"]) for item in entries], dtype=float)
-    voltage_unc = np.array([_to_mhz(item["isotope_shift_voltage_unc_GHz"]) for item in entries], dtype=float)
+    voltage_unc = np.array(
+        [_to_mhz(item.get("isotope_shift_voltage_unc_GHz", 0.0)) for item in entries],
+        dtype=float,
+    )
     wavemeter_unc = np.array(
         [_to_mhz(item.get("isotope_shift_wavemeter_unc_GHz", 0.0)) for item in entries],
         dtype=float,
@@ -473,7 +482,7 @@ def plot_isotope_shift_stability(
                     "isotope_shift_total_unc_GHz",
                     np.sqrt(
                         item["isotope_shift_fit_unc_GHz"] ** 2
-                        + item["isotope_shift_voltage_unc_GHz"] ** 2
+                        + item.get("isotope_shift_voltage_unc_GHz", 0.0) ** 2
                         + item.get("isotope_shift_wavemeter_unc_GHz", 0.0) ** 2
                     ),
                 )
