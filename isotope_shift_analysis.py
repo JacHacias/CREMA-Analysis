@@ -21,6 +21,29 @@ def voigt(x, amplitude, center, sigma_g, gamma_l, background):
     return amplitude * (profile / peak) + background
 
 
+def _voigt_fwhm(sigma_g, gamma_l):
+    gauss_fwhm = 2.354820045 * max(float(sigma_g), 1e-12)
+    lorentz_fwhm = 2.0 * max(float(gamma_l), 1e-12)
+    return 0.5346 * lorentz_fwhm + np.sqrt(0.2166 * lorentz_fwhm**2 + gauss_fwhm**2)
+
+
+def _fallback_center_uncertainty(x_fit, y_fit, sigma_g, gamma_l, background):
+    x_fit = np.asarray(x_fit, dtype=float)
+    y_fit = np.asarray(y_fit, dtype=float)
+    if x_fit.size > 1:
+        dx = float(np.median(np.diff(x_fit)))
+    else:
+        dx = 1e-3
+
+    signal = np.clip(y_fit - float(background), 0.0, None)
+    n_eff = float(np.sum(signal))
+    if n_eff <= 1.0:
+        n_eff = max(float(np.sum(y_fit > background)), 1.0)
+
+    fwhm = _voigt_fwhm(sigma_g, gamma_l)
+    return max(fwhm / (2.355 * np.sqrt(n_eff)), 0.5 * dx)
+
+
 class VoigtModel(satlas2.Model):
     def __init__(self, amplitude, center, sigma_g, gamma_l, background, name="Voigt", prefunc=None):
         super().__init__(name, prefunc=prefunc)
@@ -100,49 +123,69 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
     yerr = np.sqrt(y_fit)
     yerr[yerr <= 0] = 1.0
 
-    model = VoigtModel(amplitude_guess, center_guess, sigma_guess, gamma_guess, background_guess)
-    model.params["center"].min = x_fit.min()
-    model.params["center"].max = x_fit.max()
     if len(x_fit) > 1:
         dx = abs(x_fit[1] - x_fit[0])
     else:
         dx = 1e-3
     width_max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
-    model.params["sigma_g"].min = max(dx / 2.0, 1e-3)
-    model.params["sigma_g"].max = width_max
-    model.params["gamma_l"].min = max(dx / 2.0, 1e-3)
-    model.params["gamma_l"].max = width_max
-    model.params["background"].min = 0.0
-    model.params["background"].max = max(np.max(y_fit), 1.0)
 
-    source = satlas2.Source(x_fit, y_fit, yerr=yerr, name="HistogramData")
-    source.addModel(model)
+    def _run_fit(fix_gamma=False, fix_background=False):
+        model = VoigtModel(amplitude_guess, center_guess, sigma_guess, gamma_guess, background_guess)
+        model.params["center"].min = x_fit.min()
+        model.params["center"].max = x_fit.max()
+        model.params["sigma_g"].min = max(dx / 2.0, 1e-3)
+        model.params["sigma_g"].max = width_max
+        model.params["gamma_l"].min = max(dx / 2.0, 1e-3)
+        model.params["gamma_l"].max = width_max
+        model.params["background"].min = 0.0
+        model.params["background"].max = max(np.max(y_fit), 1.0)
+        if fix_gamma:
+            model.params["gamma_l"].vary = False
+        if fix_background:
+            model.params["background"].vary = False
 
-    fitter = satlas2.Fitter()
-    fitter.addSource(source)
-    fitter.fit(method="leastsq")
+        source = satlas2.Source(x_fit, y_fit, yerr=yerr, name="HistogramData")
+        source.addModel(model)
 
-    params = model.params
-    popt = np.array(
-        [
-            params["amplitude"].value,
-            params["center"].value,
-            params["sigma_g"].value,
-            params["gamma_l"].value,
-            params["background"].value,
-        ],
-        dtype=float,
-    )
-    perr = np.array(
-        [
-            getattr(params["amplitude"], "unc", np.nan),
-            getattr(params["center"], "unc", np.nan),
-            getattr(params["sigma_g"], "unc", np.nan),
-            getattr(params["gamma_l"], "unc", np.nan),
-            getattr(params["background"], "unc", np.nan),
-        ],
-        dtype=float,
-    )
+        fitter = satlas2.Fitter()
+        fitter.addSource(source)
+        fitter.fit(method="leastsq")
+
+        params = model.params
+        popt = np.array(
+            [
+                params["amplitude"].value,
+                params["center"].value,
+                params["sigma_g"].value,
+                params["gamma_l"].value,
+                params["background"].value,
+            ],
+            dtype=float,
+        )
+        perr = np.array(
+            [
+                getattr(params["amplitude"], "unc", np.nan),
+                getattr(params["center"], "unc", np.nan),
+                getattr(params["sigma_g"], "unc", np.nan),
+                getattr(params["gamma_l"], "unc", np.nan),
+                getattr(params["background"], "unc", np.nan),
+            ],
+            dtype=float,
+        )
+        return popt, perr
+
+    popt, perr = _run_fit()
+    if not np.isfinite(popt[1]) or not np.isfinite(perr[1]):
+        popt_retry, perr_retry = _run_fit(fix_gamma=True)
+        if np.isfinite(popt_retry[1]):
+            popt, perr = popt_retry, perr_retry
+    if not np.isfinite(popt[1]) or not np.isfinite(perr[1]):
+        popt_retry, perr_retry = _run_fit(fix_gamma=True, fix_background=True)
+        if np.isfinite(popt_retry[1]):
+            popt, perr = popt_retry, perr_retry
+    if not np.isfinite(perr[1]):
+        perr[1] = _fallback_center_uncertainty(x_fit, y_fit, popt[2], popt[3], popt[4])
+
     return popt, None, perr, x_fit
 
 
@@ -217,6 +260,8 @@ def _resolve_histogram_bins(x, bins=120, bin_width_MHz=None):
     if bin_width_MHz is None:
         return bins
 
+    # Keep bin_width_MHz in spectroscopy-frequency units even when the
+    # wavemeter axis is scaled by optical frequency doubling.
     bin_width_GHz = float(bin_width_MHz) / 1000.0
     if bin_width_GHz <= 0:
         raise ValueError("bin_width_MHz must be positive.")
