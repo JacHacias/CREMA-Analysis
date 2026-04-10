@@ -150,6 +150,10 @@ def clean_numeric_column(dat, col):
     return x[np.isfinite(x)]
 
 
+def wn_to_lab_ghz(wn_cm, frequency_multiplier=2.0):
+    return np.asarray(wn_cm, dtype=float) * float(frequency_multiplier) * C * 100.0 * 1e-9
+
+
 def apply_tof_gate(dat, tof_gate_us=None, tof_col="tof"):
     if tof_gate_us is None:
         return dat
@@ -274,8 +278,19 @@ def _occupied_xlim(centers, counts, fallback_x, include_points=None):
     return x_min - pad, x_max + pad
 
 
-def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref, bin_width_MHz=None):
-    nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
+def _fit_center_from_voltage(
+    dat,
+    mass_u,
+    beam_voltage_V,
+    wn_col,
+    bins,
+    charge_e,
+    geometry,
+    nu0_ref,
+    bin_width_MHz=None,
+    frequency_multiplier=2.0,
+):
+    nu_lab = wn_to_lab_ghz(clean_numeric_column(dat, wn_col), frequency_multiplier=frequency_multiplier)
     nu = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
     x = nu - nu0_ref
 
@@ -305,6 +320,7 @@ def plot_three_isotopes_fit(
     wn_col="wavemeter_wn1",
     bins=120,
     bin_width_MHz=None,
+    frequency_multiplier=2.0,
     tof_gate_us=None,
     tof_col="tof",
     show_tof_gate_plots=False,
@@ -323,9 +339,9 @@ def plot_three_isotopes_fit(
     cut_file_34S = apply_tof_gate(cut_file_34S, tof_gate_us=tof_gate_us, tof_col=tof_col)
     cut_file_36S = apply_tof_gate(cut_file_36S, tof_gate_us=tof_gate_us, tof_col=tof_col)
 
-    nu32_lab = clean_numeric_column(cut_file_32S, wn_col) * C * 100.0 * 1e-9
-    nu34_lab = clean_numeric_column(cut_file_34S, wn_col) * C * 100.0 * 1e-9
-    nu36_lab = clean_numeric_column(cut_file_36S, wn_col) * C * 100.0 * 1e-9
+    nu32_lab = wn_to_lab_ghz(clean_numeric_column(cut_file_32S, wn_col), frequency_multiplier=frequency_multiplier)
+    nu34_lab = wn_to_lab_ghz(clean_numeric_column(cut_file_34S, wn_col), frequency_multiplier=frequency_multiplier)
+    nu36_lab = wn_to_lab_ghz(clean_numeric_column(cut_file_36S, wn_col), frequency_multiplier=frequency_multiplier)
 
     nu32 = doppler_correct_ghz(nu32_lab, mass32_u, beam_voltage_V, charge_e, geometry)
     nu34 = doppler_correct_ghz(nu34_lab, mass34_u, beam_voltage_V, charge_e, geometry)
@@ -334,13 +350,16 @@ def plot_three_isotopes_fit(
     nu0 = np.median(nu32)
 
     res32 = _fit_center_from_voltage(
-        cut_file_32S, mass32_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+        cut_file_32S, mass32_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
+        bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
     )
     res34 = _fit_center_from_voltage(
-        cut_file_34S, mass34_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+        cut_file_34S, mass34_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
+        bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
     )
     res36 = _fit_center_from_voltage(
-        cut_file_36S, mass36_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+        cut_file_36S, mass36_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
+        bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
     )
 
     for res in (res32, res34, res36):
@@ -354,11 +373,11 @@ def plot_three_isotopes_fit(
         ]:
             c_plus = _fit_center_from_voltage(
                 dat, mass_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
-                bin_width_MHz=bin_width_MHz
+                bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
             )["center"]
             c_minus = _fit_center_from_voltage(
                 dat, mass_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
-                bin_width_MHz=bin_width_MHz
+                bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
             )["center"]
             res["center_voltage_unc"] = abs(c_plus - c_minus) / 2.0
 
@@ -440,6 +459,7 @@ def plot_three_isotopes_fit(
         "tof_gate_us": tof_gate_us,
         "tof_col": tof_col,
         "show_tof_gate_plots": bool(show_tof_gate_plots),
+        "frequency_multiplier": float(frequency_multiplier),
         "num_points_32S": int(cut_file_32S.size),
         "num_points_34S": int(cut_file_34S.size),
         "num_points_36S": int(cut_file_36S.size),

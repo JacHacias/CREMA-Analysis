@@ -151,6 +151,10 @@ def clean_numeric_column(dat, col):
     return x[np.isfinite(x)]
 
 
+def wn_to_lab_ghz(wn_cm, frequency_multiplier=2.0):
+    return np.asarray(wn_cm, dtype=float) * float(frequency_multiplier) * C * 100.0 * 1e-9
+
+
 def apply_tof_gate(dat, tof_gate_us=None, tof_col="tof"):
     if tof_gate_us is None:
         return dat
@@ -275,8 +279,19 @@ def _occupied_xlim(centers, counts, fallback_x, include_points=None):
     return x_min - pad, x_max + pad
 
 
-def _fit_center_from_voltage(dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0_ref, bin_width_MHz=None):
-    nu_lab = clean_numeric_column(dat, wn_col) * C * 100.0 * 1e-9
+def _fit_center_from_voltage(
+    dat,
+    mass_u,
+    beam_voltage_V,
+    wn_col,
+    bins,
+    charge_e,
+    geometry,
+    nu0_ref,
+    bin_width_MHz=None,
+    frequency_multiplier=2.0,
+):
+    nu_lab = wn_to_lab_ghz(clean_numeric_column(dat, wn_col), frequency_multiplier=frequency_multiplier)
     nu_rest = doppler_correct_ghz(nu_lab, mass_u, beam_voltage_V, charge_e, geometry)
     x = nu_rest - nu0_ref
 
@@ -296,6 +311,7 @@ def plot_two_isotopes_fit(
     wn_col="wavemeter_wn1",
     bins=120,
     bin_width_MHz=None,
+    frequency_multiplier=2.0,
     tof_gate_us=None,
     tof_col="tof",
     show_tof_gate_plots=False,
@@ -319,8 +335,8 @@ def plot_two_isotopes_fit(
     cut_file_1 = apply_tof_gate(cut_file_1, tof_gate_us=tof_gate_us, tof_col=tof_col)
     cut_file_2 = apply_tof_gate(cut_file_2, tof_gate_us=tof_gate_us, tof_col=tof_col)
 
-    nu1_lab = clean_numeric_column(cut_file_1, wn_col) * C * 100.0 * 1e-9
-    nu2_lab = clean_numeric_column(cut_file_2, wn_col) * C * 100.0 * 1e-9
+    nu1_lab = wn_to_lab_ghz(clean_numeric_column(cut_file_1, wn_col), frequency_multiplier=frequency_multiplier)
+    nu2_lab = wn_to_lab_ghz(clean_numeric_column(cut_file_2, wn_col), frequency_multiplier=frequency_multiplier)
 
     nu1 = doppler_correct_ghz(nu1_lab, mass1_u, beam_voltage_V, charge_e, geometry)
     nu2 = doppler_correct_ghz(nu2_lab, mass2_u, beam_voltage_V, charge_e, geometry)
@@ -328,10 +344,12 @@ def plot_two_isotopes_fit(
     nu0 = 0.5 * (np.median(nu1) + np.median(nu2))
 
     center1, dcenter1_fit, x1, counts1, centers1, p1, xfit_window1 = _fit_center_from_voltage(
-        cut_file_1, mass1_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+        cut_file_1, mass1_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
+        bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
     )
     center2, dcenter2_fit, x2, counts2, centers2, p2, xfit_window2 = _fit_center_from_voltage(
-        cut_file_2, mass2_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0, bin_width_MHz=bin_width_MHz
+        cut_file_2, mass2_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
+        bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
     )
 
     isotope_shift = float(center2) - float(center1)
@@ -344,21 +362,21 @@ def plot_two_isotopes_fit(
     if beam_voltage_unc_V > 0:
         c1_plus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_1, mass1_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
-            bin_width_MHz=bin_width_MHz
+            bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
         )
         c1_minus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_1, mass1_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
-            bin_width_MHz=bin_width_MHz
+            bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
         )
         dcenter1_V = abs(float(c1_plus) - float(c1_minus)) / 2.0
 
         c2_plus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_2, mass2_u, beam_voltage_V + beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
-            bin_width_MHz=bin_width_MHz
+            bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
         )
         c2_minus, _, _, _, _, _, _ = _fit_center_from_voltage(
             cut_file_2, mass2_u, beam_voltage_V - beam_voltage_unc_V, wn_col, bins, charge_e, geometry, nu0,
-            bin_width_MHz=bin_width_MHz
+            bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier
         )
         dcenter2_V = abs(float(c2_plus) - float(c2_minus)) / 2.0
 
@@ -441,6 +459,7 @@ def plot_two_isotopes_fit(
         "tof_gate_us": tof_gate_us,
         "tof_col": tof_col,
         "show_tof_gate_plots": bool(show_tof_gate_plots),
+        "frequency_multiplier": float(frequency_multiplier),
         "num_points_1": int(cut_file_1.size),
         "num_points_2": int(cut_file_2.size),
     }

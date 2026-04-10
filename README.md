@@ -34,6 +34,7 @@ out = plot_two_isotopes_fit(
     mass1_u=31.972071,
     mass2_u=33.967867,
     wn_col="wavemeter_wn1",
+    frequency_multiplier=2.0,
     bin_width_MHz=20.0,
     tof_gate_us=(4.25, 5.5),
     show_tof_gate_plots=True,
@@ -58,6 +59,7 @@ out = plot_three_isotopes_fit(
     mass34_u=33.967867,
     mass36_u=35.967081,
     wn_col="wavemeter_wn1",
+    frequency_multiplier=2.0,
     bin_width_MHz=20.0,
     tof_gate_us=(4.25, 5.5),
     show_tof_gate_plots=True,
@@ -70,6 +72,7 @@ out = plot_three_isotopes_fit(
 ## Notes
 
 - `beam_voltage_unc_V` should include the effect of HV drift/oscillation if the scans were taken at different times.
+- `frequency_multiplier=2.0` is appropriate when the wavemeter column records the fundamental laser before optical doubling. Set it to `1.0` if the column is already the doubled spectroscopy frequency.
 - You can use either `bins=...` or `bin_width_MHz=...` to control histogram binning. If `bin_width_MHz` is given, it takes precedence.
 - You can optionally apply ToF gating inside the analysis functions with `tof_gate_us=(min_us, max_us)`. If you already passed pre-gated cut files, leave this as `None`.
 - Set `show_tof_gate_plots=True` to display raw and gated ToF histograms before the isotope-shift fit.
