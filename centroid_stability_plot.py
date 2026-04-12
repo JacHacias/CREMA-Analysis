@@ -4,6 +4,8 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plot_style import apply_publication_style, style_axes
+
 
 GHZ_TO_MHZ = 1000.0
 
@@ -199,6 +201,7 @@ def plot_centroid_stability(
     fig, axes
         Matplotlib figure and axes.
     """
+    apply_publication_style()
     if not results:
         raise ValueError("results must contain at least one entry.")
 
@@ -286,13 +289,15 @@ def plot_centroid_stability(
         fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
 
     centroid_style = {
-        "elinewidth": 1.2,
-        "capsize": 4,
+        "elinewidth": 1.0,
+        "ecolor": "black",
+        "capsize": 3,
         "markersize": 6,
         "linewidth": 1.2,
     }
     component_style = {
         "elinewidth": 1.0,
+        "ecolor": "black",
         "capsize": 3,
         "markersize": 4,
         "linewidth": 0.9,
@@ -412,6 +417,7 @@ def plot_centroid_stability(
     axes[-1].set_xlabel("Scan day", fontweight="bold")
     for ax in axes:
         ax.set_xlim(min(x_positions) - 0.35, max(x_positions) + 0.35)
+        style_axes(ax)
 
     fig.tight_layout()
     return fig, axes
@@ -450,6 +456,7 @@ def plot_isotope_shift_stability(
     fig, axes
         Matplotlib figure and axes.
     """
+    apply_publication_style()
     if not results:
         raise ValueError("results must contain at least one entry.")
 
@@ -508,13 +515,15 @@ def plot_isotope_shift_stability(
         axes = np.array([axes])
 
     centroid_style = {
-        "elinewidth": 1.2,
-        "capsize": 4,
+        "elinewidth": 1.0,
+        "ecolor": "black",
+        "capsize": 3,
         "markersize": 6,
         "linewidth": 1.2,
     }
     component_style = {
         "elinewidth": 1.0,
+        "ecolor": "black",
         "capsize": 3,
         "markersize": 4,
         "linewidth": 0.9,
@@ -595,6 +604,7 @@ def plot_isotope_shift_stability(
     axes[-1].set_xlabel("Scan day", fontweight="bold")
     for ax in axes:
         ax.set_xlim(min(x_positions) - 0.35, max(x_positions) + 0.35)
+        style_axes(ax)
 
     fig.tight_layout()
     return fig, axes
