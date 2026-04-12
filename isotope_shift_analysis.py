@@ -206,7 +206,7 @@ def _lab_frequency_and_voltage(
     frequency_multiplier=2.0,
     beam_voltage_V=10000.0,
     voltage_col="voltage",
-    voltage_multiplier=6000.0,
+    voltage_multiplier=5962.0,
     use_voltage_column=True,
     voltage_offset_V=0.0,
 ):
@@ -379,7 +379,7 @@ def _fit_center_from_voltage(
     bin_width_MHz=None,
     frequency_multiplier=2.0,
     voltage_col="voltage",
-    voltage_multiplier=6000.0,
+    voltage_multiplier=5962.0,
     use_voltage_column=True,
     voltage_offset_V=0.0,
 ):
@@ -420,7 +420,7 @@ def plot_two_isotopes_fit(
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     voltage_col="voltage",
-    voltage_multiplier=6000.0,
+    voltage_multiplier=5962.0,
     use_voltage_column=True,
     charge_e=1,
     geometry="collinear",
