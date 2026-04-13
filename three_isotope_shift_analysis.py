@@ -367,6 +367,14 @@ def _poisson_yerr(counts):
     return np.sqrt(np.clip(counts, 1.0, None))
 
 
+def _estimate_peak_snr(fit_params):
+    amplitude = max(float(fit_params[0]), 0.0)
+    background = max(float(fit_params[4]), 0.0)
+    peak_total = amplitude + background
+    noise = np.sqrt(max(peak_total, 1.0))
+    return amplitude / noise
+
+
 def _fit_center_from_voltage(
     dat,
     mass_u,
@@ -587,8 +595,11 @@ def plot_three_isotopes_fit(
     plt.show()
 
     print(f"32S center: {res32['center']:.6f} +/- {res32['center_total_unc']:.6f} GHz")
+    print(f"  estimated peak SNR: {_estimate_peak_snr(res32['fit_params']):.2f}")
     print(f"34S center: {res34['center']:.6f} +/- {res34['center_total_unc']:.6f} GHz")
+    print(f"  estimated peak SNR: {_estimate_peak_snr(res34['fit_params']):.2f}")
     print(f"36S center: {res36['center']:.6f} +/- {res36['center_total_unc']:.6f} GHz")
+    print(f"  estimated peak SNR: {_estimate_peak_snr(res36['fit_params']):.2f}")
     print()
     print(f"Isotope shift (34S - 32S): {shift_34_32:.6f} +/- {shift_34_32_total_unc:.6f} GHz")
     print(f"  fit contribution: {shift_34_32_fit_unc:.6f} GHz")
