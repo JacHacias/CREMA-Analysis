@@ -10,6 +10,7 @@ from plot_style import apply_publication_style, style_axes
 C = 299792458.0
 E_CHARGE = 1.602176634e-19
 AMU = 1.66053906660e-27
+B_HVD2 = 5962.49
 
 
 def voigt(x, amplitude, center, sigma_g, gamma_l, background):
@@ -205,7 +206,7 @@ def _lab_frequency_and_voltage(
     frequency_multiplier=2.0,
     beam_voltage_V=10000.0,
     voltage_col="voltage",
-    voltage_multiplier=5962.0,
+    voltage_multiplier=B_HVD2,
     use_voltage_column=True,
     voltage_offset_V=0.0,
 ):
@@ -378,7 +379,7 @@ def _fit_center_from_voltage(
     bin_width_MHz=None,
     frequency_multiplier=2.0,
     voltage_col="voltage",
-    voltage_multiplier=5962.0,
+    voltage_multiplier=B_HVD2,
     use_voltage_column=True,
     voltage_offset_V=0.0,
 ):
@@ -429,7 +430,7 @@ def plot_three_isotopes_fit(
     beam_voltage_V=10000.0,
     beam_voltage_unc_V=0.0,
     voltage_col="voltage",
-    voltage_multiplier=5962.0,
+    voltage_multiplier=B_HVD2,
     use_voltage_column=True,
     charge_e=1,
     geometry="collinear",
