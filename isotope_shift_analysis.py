@@ -10,6 +10,7 @@ from plot_style import apply_publication_style, style_axes
 C = 299792458.0
 E_CHARGE = 1.602176634e-19
 AMU = 1.66053906660e-27
+ELECTRON_MASS_U = 5.48579909065e-4
 B_HVD2 = 5962.49
 
 
@@ -69,7 +70,11 @@ class VoigtModel(satlas2.Model):
 
 
 def doppler_correct_ghz(nu_lab_ghz, mass_u, beam_voltage_V=10000.0, charge_e=1, geometry="collinear"):
-    m = mass_u * AMU
+    ion_mass_u = float(mass_u) - float(charge_e) * ELECTRON_MASS_U
+    if ion_mass_u <= 0:
+        raise ValueError("Ion mass must be positive after electron-mass correction.")
+
+    m = ion_mass_u * AMU
     q = charge_e * E_CHARGE
     kinetic_energy = q * beam_voltage_V
 

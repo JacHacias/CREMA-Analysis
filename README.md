@@ -78,6 +78,7 @@ out = plot_three_isotopes_fit(
 - By default, the Doppler correction uses the per-event voltage column when available: `voltage_col="voltage"` scaled by `voltage_multiplier=5962.49`, the `B_HVD2` high-voltage divider factor. If the column is missing, the scripts fall back to `beam_voltage_V`.
 - Set `use_voltage_column=False` to force the older fixed-voltage behavior.
 - `beam_voltage_unc_V` is applied as an additional voltage offset uncertainty on top of either the voltage-column values or the fixed fallback value.
+- Pass neutral isotope masses as `mass*_u`; the Doppler correction internally subtracts `charge_e` electron masses to use the ion mass for the accelerated 1+ beam.
 - `frequency_multiplier=2.0` is appropriate when the wavemeter column records the fundamental laser before optical doubling. Set it to `1.0` if the column is already the doubled spectroscopy frequency.
 - You can use either `bins=...` or `bin_width_MHz=...` to control histogram binning. If `bin_width_MHz` is given, it takes precedence.
 - You can optionally apply ToF gating inside the analysis functions with `tof_gate_us=(min_us, max_us)`. If you already passed pre-gated cut files, leave this as `None`.
