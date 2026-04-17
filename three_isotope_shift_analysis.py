@@ -70,18 +70,11 @@ class VoigtModel(satlas2.Model):
         return voigt(x, amplitude, center, sigma_g, gamma_l, background)
 
 
-def _beta_from_momentum(momentum_kg_m_s, mass_u):
-    mass_kg = float(mass_u) * AMU
-    momentum_kg_m_s = np.asarray(momentum_kg_m_s, dtype=float)
-    return momentum_kg_m_s / np.sqrt(momentum_kg_m_s**2 + (mass_kg * C) ** 2)
-
-
 def _sulfur_velocity_after_sodium_collision(
     velocity_m_s,
     mass_u,
     charge_e=1,
     sodium_mass_u=SODIUM_MASS_U,
-    sodium_velocity_m_s=0.0,
     sodium_collision_branch="forward",
 ):
     ion_mass_kg = (float(mass_u) - float(charge_e) * ELECTRON_MASS_U) * AMU
@@ -90,13 +83,9 @@ def _sulfur_velocity_after_sodium_collision(
     sodium_ion_mass_kg = (float(sodium_mass_u) - ELECTRON_MASS_U) * AMU
 
     velocity_m_s = np.asarray(velocity_m_s, dtype=float)
-    sodium_velocity_m_s = np.asarray(sodium_velocity_m_s, dtype=float)
 
-    total_momentum = ion_mass_kg * velocity_m_s + sodium_neutral_mass_kg * sodium_velocity_m_s
-    total_kinetic = (
-        0.5 * ion_mass_kg * velocity_m_s**2
-        + 0.5 * sodium_neutral_mass_kg * sodium_velocity_m_s**2
-    )
+    total_momentum = ion_mass_kg * velocity_m_s
+    total_kinetic = 0.5 * ion_mass_kg * velocity_m_s**2
 
     # Nonrelativistic two-body kinematics are more than sufficient at 10 kV
     # sulfur beam speeds. The two roots correspond to forward charge exchange
@@ -133,7 +122,6 @@ def beam_beta_after_cec(
     charge_e=1,
     neutralization="none",
     sodium_mass_u=SODIUM_MASS_U,
-    sodium_velocity_m_s=0.0,
     sodium_collision_branch="forward",
 ):
     ion_mass_u = float(mass_u) - float(charge_e) * ELECTRON_MASS_U
@@ -152,9 +140,13 @@ def beam_beta_after_cec(
         return beta
 
     if mode in ("electron_capture", "neutral", "neutral_mass"):
-        ion_momentum = gamma * m * beta * C
-        electron_momentum = ELECTRON_MASS_U * AMU * float(sodium_velocity_m_s)
-        return _beta_from_momentum(ion_momentum + electron_momentum, mass_u)
+        # Momentum-conserving capture, written in the kinetic-energy form:
+        # T_atom = -m_atom c^2 + sqrt((m_atom c^2)^2 + T_ion^2 + 2 T_ion m_ion c^2)
+        atom_mass_energy = float(mass_u) * AMU * C**2
+        atom_total_energy = np.sqrt(
+            atom_mass_energy**2 + KE**2 + 2.0 * KE * m * C**2
+        )
+        return np.sqrt(1.0 - (atom_mass_energy / atom_total_energy) ** 2)
 
     if mode in ("sodium_charge_exchange", "sodium_collision", "charge_exchange"):
         ion_velocity = beta * C
@@ -163,7 +155,6 @@ def beam_beta_after_cec(
             mass_u,
             charge_e=charge_e,
             sodium_mass_u=sodium_mass_u,
-            sodium_velocity_m_s=sodium_velocity_m_s,
             sodium_collision_branch=sodium_collision_branch,
         )
         return sulfur_velocity / C
@@ -182,7 +173,6 @@ def doppler_correct_ghz(
     *,
     neutralization="none",
     sodium_mass_u=SODIUM_MASS_U,
-    sodium_velocity_m_s=0.0,
     sodium_collision_branch="forward",
 ):
     beta = beam_beta_after_cec(
@@ -191,7 +181,6 @@ def doppler_correct_ghz(
         charge_e=charge_e,
         neutralization=neutralization,
         sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
     gamma = 1.0 / np.sqrt(1.0 - beta**2)
@@ -512,7 +501,6 @@ def _fit_center_from_voltage(
     voltage_offset_V=0.0,
     neutralization="none",
     sodium_mass_u=SODIUM_MASS_U,
-    sodium_velocity_m_s=0.0,
     sodium_collision_branch="forward",
 ):
     nu_lab, voltage_V, _ = _lab_frequency_and_voltage(
@@ -533,7 +521,6 @@ def _fit_center_from_voltage(
         geometry,
         neutralization=neutralization,
         sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
     x = nu - nu0_ref
@@ -578,7 +565,6 @@ def plot_three_isotopes_fit(
     geometry="collinear",
     neutralization="none",
     sodium_mass_u=SODIUM_MASS_U,
-    sodium_velocity_m_s=0.0,
     sodium_collision_branch="forward",
 ):
     apply_publication_style()
@@ -622,19 +608,16 @@ def plot_three_isotopes_fit(
     nu32 = doppler_correct_ghz(
         nu32_lab, mass32_u, voltage32_V, charge_e, geometry,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
     nu34 = doppler_correct_ghz(
         nu34_lab, mass34_u, voltage34_V, charge_e, geometry,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
     nu36 = doppler_correct_ghz(
         nu36_lab, mass36_u, voltage36_V, charge_e, geometry,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
 
@@ -646,7 +629,6 @@ def plot_three_isotopes_fit(
         voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
     res34 = _fit_center_from_voltage(
@@ -655,7 +637,6 @@ def plot_three_isotopes_fit(
         voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
     res36 = _fit_center_from_voltage(
@@ -664,7 +645,6 @@ def plot_three_isotopes_fit(
         voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-        sodium_velocity_m_s=sodium_velocity_m_s,
         sodium_collision_branch=sodium_collision_branch,
     )
 
@@ -683,7 +663,6 @@ def plot_three_isotopes_fit(
                 voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
                 use_voltage_column=use_voltage_column, voltage_offset_V=beam_voltage_unc_V,
                 neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-                sodium_velocity_m_s=sodium_velocity_m_s,
                 sodium_collision_branch=sodium_collision_branch,
             )["center"]
             c_minus = _fit_center_from_voltage(
@@ -692,7 +671,6 @@ def plot_three_isotopes_fit(
                 voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
                 use_voltage_column=use_voltage_column, voltage_offset_V=-beam_voltage_unc_V,
                 neutralization=neutralization, sodium_mass_u=sodium_mass_u,
-                sodium_velocity_m_s=sodium_velocity_m_s,
                 sodium_collision_branch=sodium_collision_branch,
             )["center"]
             res["center_voltage_unc"] = abs(c_plus - c_minus) / 2.0
@@ -809,7 +787,6 @@ def plot_three_isotopes_fit(
         "voltage36_mean_V": float(np.mean(voltage36_V)),
         "neutralization": neutralization,
         "sodium_mass_u": float(sodium_mass_u),
-        "sodium_velocity_m_s": float(sodium_velocity_m_s),
         "sodium_collision_branch": sodium_collision_branch,
         "num_points_32S": int(cut_file_32S.size),
         "num_points_34S": int(cut_file_34S.size),
