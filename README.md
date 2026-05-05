@@ -10,6 +10,8 @@ Utilities and notebooks for sulfur isotope analysis, including Doppler-corrected
   Three-isotope comparison for `32S`, `34S`, and `36S` with separate panels and shifts reported relative to `32S`.
 - `Sulfur_plotting.ipynb`
   Notebook workflow for data exploration and analysis.
+- `dp900_ui/app.py`
+  Browser GUI for controlling a Rigol DP932A / DP900-series power supply over LAN socket, VISA, or simulator mode.
 
 ## Requirements
 
@@ -22,6 +24,14 @@ import satlas2
 ```
 
 `satlas2` provides the Voigt fitting used in the isotope-shift scripts. Install it with `pip install satlas2`.
+
+The Rigol DP900 control UI has no required packages for LAN socket or simulator mode. From the repo root, run:
+
+```powershell
+python .\dp900_ui\app.py
+```
+
+Then open `http://127.0.0.1:8765`.
 
 ## Two-Isotope Example
 
