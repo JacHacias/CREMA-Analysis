@@ -956,10 +956,10 @@ INDEX_HTML = r"""<!doctype html>
           <label><span data-role="voltageLabel">Voltage setpoint (V)</span>
             <input data-role="voltage" type="number" min="0" step="0.001" value="0.000" />
           </label>
-          <label>Ramp rate (V/s)
+          <label><span data-role="rampRateLabel">Ramp rate (V/s)</span>
             <input data-role="rampRate" type="number" min="0" step="0.001" value="0.200" />
           </label>
-          <label>Ramp interval (s)
+          <label><span data-role="rampSecondsLabel">Ramp interval (s)</span>
             <input data-role="rampSeconds" type="number" min="0" step="1" value="" placeholder="optional" />
           </label>
           <label><span data-role="currentLabel">Current limit (A)</span>
@@ -1008,6 +1008,8 @@ INDEX_HTML = r"""<!doctype html>
         resource: "",
         applyText: "CV setup applied.",
         voltageLabel: "Voltage setpoint (V)",
+        rampRateLabel: "Ramp rate (V/s)",
+        rampSecondsLabel: "Ramp interval (s)",
         currentLabel: "Current limit (A)",
         ovpLabel: "OVP limit (V)",
         ocpLabel: "OCP limit (A)",
@@ -1022,6 +1024,8 @@ INDEX_HTML = r"""<!doctype html>
         resource: "USB0::0x1AB1::0xA4A8::DP9A282M00021::INSTR",
         applyText: "current setup applied.",
         voltageLabel: "Voltage compliance (V)",
+        rampRateLabel: "Voltage compliance ramp (V/s)",
+        rampSecondsLabel: "Compliance ramp interval (s)",
         currentLabel: "Current setpoint (A)",
         ovpLabel: "Voltage trip limit (V)",
         ocpLabel: "Current trip limit (A)",
@@ -1032,6 +1036,8 @@ INDEX_HTML = r"""<!doctype html>
         label: "Custom",
         applyText: "setup applied.",
         voltageLabel: "Voltage setpoint / compliance (V)",
+        rampRateLabel: "Ramp rate (V/s)",
+        rampSecondsLabel: "Ramp interval (s)",
         currentLabel: "Current setpoint / limit (A)",
         ovpLabel: "OVP limit (V)",
         ocpLabel: "OCP limit (A)",
@@ -1082,6 +1088,8 @@ INDEX_HTML = r"""<!doctype html>
     function applyPanelProfile(panel) {
       const profile = profiles[activeProfile] || profiles.custom;
       updateText(panel, "voltageLabel", profile.voltageLabel);
+      updateText(panel, "rampRateLabel", profile.rampRateLabel);
+      updateText(panel, "rampSecondsLabel", profile.rampSecondsLabel);
       updateText(panel, "currentLabel", profile.currentLabel);
       updateText(panel, "ovpLabel", profile.ovpLabel);
       updateText(panel, "ocpLabel", profile.ocpLabel);
