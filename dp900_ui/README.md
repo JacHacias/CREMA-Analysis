@@ -25,6 +25,7 @@ http://127.0.0.1:8765/cec
 
 The HV profile defaults to LAN socket mode for the DP932A at `192.168.1.181`, port `5555`.
 The CEC profile defaults to VISA USB mode at `USB0::0x1AB1::0xA4A8::DP9A282M00021::INSTR` and labels current as the setpoint with voltage as the compliance limit.
+The server keeps independent backend connections for the HV and CEC profiles, so each page reports the mode and protection state for its own physical supply.
 
 ## Main Controls
 

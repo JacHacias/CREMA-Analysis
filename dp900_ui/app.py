@@ -475,7 +475,16 @@ class DP900Controller:
                     pass
 
 
-controller = DP900Controller()
+CONTROLLERS = {profile: DP900Controller() for profile in ("hv", "cec", "custom")}
+
+
+def _profile_name(value: Any) -> str:
+    profile = str(value or "hv").strip().lower()
+    return profile if profile in CONTROLLERS else "hv"
+
+
+def _controller_for(value: Any) -> DP900Controller:
+    return CONTROLLERS[_profile_name(value)]
 
 
 def _normalize_channel(channel: str) -> str:
@@ -560,10 +569,13 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/status":
             params = urllib.parse.parse_qs(parsed.query)
             channel = params.get("channel", ["CH1"])[0]
-            self._json_response(lambda: controller.status(channel))
+            profile = params.get("profile", ["hv"])[0]
+            self._json_response(lambda: _controller_for(profile).status(channel))
             return
         if parsed.path == "/api/status_all":
-            self._json_response(controller.status_all)
+            params = urllib.parse.parse_qs(parsed.query)
+            profile = params.get("profile", ["hv"])[0]
+            self._json_response(lambda: _controller_for(profile).status_all())
             return
         self.send_error(404)
 
@@ -590,14 +602,18 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length).decode("utf-8"))
 
     def _connect(self) -> dict[str, Any]:
-        return controller.connect(self._read_json())
+        data = self._read_json()
+        return _controller_for(data.get("profile")).connect(data)
 
     def _disconnect(self) -> dict[str, Any]:
+        data = self._read_json()
+        controller = _controller_for(data.get("profile"))
         controller.disconnect()
         return {"connected": False}
 
     def _apply(self) -> dict[str, Any]:
         data = self._read_json()
+        controller = _controller_for(data.get("profile"))
         controller.apply_channel(
             str(data.get("channel", "CH1")),
             float(data["voltage"]),
@@ -612,6 +628,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _output(self) -> dict[str, Any]:
         data = self._read_json()
+        controller = _controller_for(data.get("profile"))
         channel = str(data.get("channel", "CH1"))
         controller.set_output(
             channel,
@@ -623,12 +640,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _clear(self) -> dict[str, Any]:
         data = self._read_json()
+        controller = _controller_for(data.get("profile"))
         channel = str(data.get("channel", "CH1"))
         controller.clear_protection(channel)
         return controller.status(channel)
 
     def _schedule(self) -> dict[str, Any]:
         data = self._read_json()
+        controller = _controller_for(data.get("profile"))
         controller.schedule_ready_for_tomorrow(
             str(data.get("channel", "CH1")),
             str(data["readyTime"]),
@@ -644,6 +663,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _cancel_schedule(self) -> dict[str, Any]:
         data = self._read_json()
+        controller = _controller_for(data.get("profile"))
         channel = str(data.get("channel", "CH1"))
         controller.cancel_schedule(channel)
         return controller.status(channel)
@@ -1023,12 +1043,15 @@ INDEX_HTML = r"""<!doctype html>
     let timer = null;
 
     async function api(path, body) {
+      const url = body === undefined && path.startsWith("/api/")
+        ? `${path}${path.includes("?") ? "&" : "?"}profile=${encodeURIComponent(activeProfile)}`
+        : path;
       const options = body === undefined ? {} : {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(body),
+        body: JSON.stringify({profile: activeProfile, ...body}),
       };
-      const res = await fetch(path, options);
+      const res = await fetch(url, options);
       const payload = await res.json();
       if (!payload.ok) throw new Error(payload.error || "Request failed");
       return payload.data;
