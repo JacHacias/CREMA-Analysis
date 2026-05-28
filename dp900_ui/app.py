@@ -250,7 +250,7 @@ class DP900Controller:
             raise InstrumentError("Ramp rate must be 0 or greater.")
         self._cancel_ramp(ch)
         with self._lock:
-            output_is_on = _bool_query(self.query(f":OUTP? {ch}"))
+            output_is_on = self._output_state(ch)
             start_voltage = _float_query(self.query(f":SOUR{n}:VOLT?"))
             effective_ramp_rate = _effective_ramp_rate(start_voltage, voltage, ramp_rate, ramp_seconds)
             self.write(f":SOUR{n}:CURR {current:.6g}")
@@ -282,7 +282,7 @@ class DP900Controller:
         with self._lock:
             if output:
                 target_voltage = _float_query(self.query(f":SOUR{n}:VOLT?"))
-                is_already_on = _bool_query(self.query(f":OUTP? {ch}"))
+                is_already_on = self._output_state(ch)
                 if not is_already_on and target_voltage > 0 and ramp_rate > 0:
                     effective_ramp_rate = _effective_ramp_rate(0.0, target_voltage, ramp_rate, ramp_seconds)
                     self.write(f":SOUR{n}:VOLT 0")
@@ -294,6 +294,9 @@ class DP900Controller:
     def clear_protection(self, channel: str) -> None:
         ch = _normalize_channel(channel)
         with self._lock:
+            if isinstance(self.transport, VisaTransport):
+                self.write("*CLS")
+                return
             self.write(f":OUTP:OVP:CLE {ch}")
             self.write(f":OUTP:OCP:CLE {ch}")
 
@@ -360,13 +363,11 @@ class DP900Controller:
         ch = _normalize_channel(channel)
         n = CHANNELS[ch]
         with self._lock:
-            measured = _parse_csv_floats(self.query(f":MEAS:ALL? {ch}"), 3)
-            output = _bool_query(self.query(f":OUTP? {ch}"))
-            mode = self.query(f":OUTP:MODE? {ch}").upper()
-            if mode not in {"CV", "CC", "UR"}:
-                mode = MODE_NAMES.get(self.query(f":STAT:QUES:INST:ISUM{n}:COND?").strip(), mode)
-            if not output:
-                mode = "OFF"
+            measured = self._measure_all(ch)
+            output = self._output_state(ch)
+            set_voltage = _float_query(self.query(f":SOUR{n}:VOLT?"))
+            set_current = _float_query(self.query(f":SOUR{n}:CURR?"))
+            mode = self._mode(ch, n, output, measured[1], set_current)
             return {
                 "channel": ch,
                 "connected": self.connected,
@@ -374,8 +375,8 @@ class DP900Controller:
                 "measuredVoltage": measured[0],
                 "measuredCurrent": measured[1],
                 "measuredPower": measured[2],
-                "setVoltage": _float_query(self.query(f":SOUR{n}:VOLT?")),
-                "setCurrent": _float_query(self.query(f":SOUR{n}:CURR?")),
+                "setVoltage": set_voltage,
+                "setCurrent": set_current,
                 "output": output,
                 "mode": mode,
                 "ovpEnabled": _bool_query(self.query(f":OUTP:OVP? {ch}")),
@@ -388,6 +389,36 @@ class DP900Controller:
                 "rampTarget": self._ramp_target[ch],
                 **self._schedule_status(ch),
             }
+
+    def _measure_all(self, channel: str) -> list[float]:
+        if isinstance(self.transport, VisaTransport):
+            volts = _float_query(self.query(f":MEAS:VOLT? {channel}"))
+            amps = _float_query(self.query(f":MEAS:CURR? {channel}"))
+            return [volts, amps, volts * amps]
+        return _parse_csv_floats(self.query(f":MEAS:ALL? {channel}"), 3)
+
+    def _output_state(self, channel: str) -> bool:
+        if isinstance(self.transport, VisaTransport):
+            return _bool_query(self.query(f":OUTP:STAT? {channel}"))
+        return _bool_query(self.query(f":OUTP? {channel}"))
+
+    def _mode(self, channel: str, channel_number: int, output: bool, measured_current: float, set_current: float) -> str:
+        if not output:
+            return "OFF"
+        try:
+            mode = self.query(f":OUTP:MODE? {channel}").upper()
+            if mode in {"CV", "CC", "UR"}:
+                return mode
+        except Exception:
+            mode = ""
+        if not isinstance(self.transport, VisaTransport):
+            try:
+                return MODE_NAMES.get(self.query(f":STAT:QUES:INST:ISUM{channel_number}:COND?").strip(), mode or "CV")
+            except Exception:
+                pass
+        if set_current > 0 and measured_current >= 0.98 * set_current:
+            return "CC"
+        return "CV"
 
     def status_all(self) -> dict[str, Any]:
         return {
