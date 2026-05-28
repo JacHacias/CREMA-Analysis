@@ -554,7 +554,7 @@ def _parse_ready_time(text: str) -> datetime:
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path == "/":
+        if parsed.path in {"/", "/hv", "/cec"}:
             self._send_html(INDEX_HTML)
             return
         if parsed.path == "/api/status":
@@ -753,7 +753,7 @@ INDEX_HTML = r"""<!doctype html>
     button.danger { background: var(--danger); border-color: var(--danger); color: white; }
     .connection-grid {
       display: grid;
-      grid-template-columns: 1.1fr 1.2fr .7fr 1.7fr;
+      grid-template-columns: 1.1fr 1.1fr 1.2fr .7fr 1.7fr;
       gap: 12px;
       align-items: end;
     }
@@ -870,7 +870,7 @@ INDEX_HTML = r"""<!doctype html>
   <main>
     <header>
       <div>
-        <h1>Rigol DP900 Control</h1>
+        <h1>Rigol DP900 Control <span id="supplyName">HV</span></h1>
         <div class="muted" id="identity">Disconnected</div>
       </div>
       <span class="pill" id="connectionState">Offline</span>
@@ -878,6 +878,13 @@ INDEX_HTML = r"""<!doctype html>
 
     <section>
       <div class="connection-grid">
+        <label>Supply profile
+          <select id="profile">
+            <option value="hv">HV Rigol</option>
+            <option value="cec">CEC Rigol</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
         <label>Connection
           <select id="mode">
             <option value="tcp">LAN socket</option>
@@ -926,7 +933,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="readout"><span>Measured P</span><b data-role="measP">--</b></div>
         </div>
         <div class="set-grid">
-          <label>Voltage setpoint (V)
+          <label><span data-role="voltageLabel">Voltage setpoint (V)</span>
             <input data-role="voltage" type="number" min="0" step="0.001" value="0.000" />
           </label>
           <label>Ramp rate (V/s)
@@ -935,19 +942,19 @@ INDEX_HTML = r"""<!doctype html>
           <label>Ramp interval (s)
             <input data-role="rampSeconds" type="number" min="0" step="1" value="" placeholder="optional" />
           </label>
-          <label>Current limit (A)
+          <label><span data-role="currentLabel">Current limit (A)</span>
             <input data-role="current" type="number" min="0" max="3.3" step="0.001" value="0.100" />
           </label>
-          <label>OVP limit (V)
+          <label><span data-role="ovpLabel">OVP limit (V)</span>
             <input data-role="ovp" type="number" min="0.001" step="0.001" value="35.200" />
           </label>
-          <label>OCP limit (A)
+          <label><span data-role="ocpLabel">OCP limit (A)</span>
             <input data-role="ocp" type="number" min="0.001" max="3.3" step="0.001" value="3.300" />
           </label>
         </div>
         <div class="read-grid">
-          <div class="readout"><span>Set V</span><b data-role="setV">--</b></div>
-          <div class="readout"><span>Limit I</span><b data-role="setI">--</b></div>
+          <div class="readout"><span data-role="setVLabel">Set V</span><b data-role="setV">--</b></div>
+          <div class="readout"><span data-role="setILabel">Limit I</span><b data-role="setI">--</b></div>
           <div class="readout"><span>OVP</span><b data-role="ovpRead">--</b></div>
           <div class="readout"><span>OCP</span><b data-role="ocpRead">--</b></div>
         </div>
@@ -972,6 +979,47 @@ INDEX_HTML = r"""<!doctype html>
     const $ = (id) => document.getElementById(id);
     const channels = ["CH1", "CH2", "CH3"];
     const panels = new Map();
+    const profiles = {
+      hv: {
+        label: "HV Rigol",
+        mode: "tcp",
+        host: "192.168.1.181",
+        port: 5555,
+        resource: "",
+        applyText: "CV setup applied.",
+        voltageLabel: "Voltage setpoint (V)",
+        currentLabel: "Current limit (A)",
+        ovpLabel: "OVP limit (V)",
+        ocpLabel: "OCP limit (A)",
+        setVLabel: "Set V",
+        setILabel: "Limit I",
+      },
+      cec: {
+        label: "CEC Rigol",
+        mode: "visa",
+        host: "",
+        port: 5555,
+        resource: "USB0::0x1AB1::0xA4A8::DP9A282M00021::INSTR",
+        applyText: "current setup applied.",
+        voltageLabel: "Voltage compliance (V)",
+        currentLabel: "Current setpoint (A)",
+        ovpLabel: "Voltage trip limit (V)",
+        ocpLabel: "Current trip limit (A)",
+        setVLabel: "Compliance V",
+        setILabel: "Set I",
+      },
+      custom: {
+        label: "Custom",
+        applyText: "setup applied.",
+        voltageLabel: "Voltage setpoint / compliance (V)",
+        currentLabel: "Current setpoint / limit (A)",
+        ovpLabel: "OVP limit (V)",
+        ocpLabel: "OCP limit (A)",
+        setVLabel: "Set V",
+        setILabel: "Set I",
+      },
+    };
+    let activeProfile = "hv";
     let timer = null;
 
     async function api(path, body) {
@@ -1001,6 +1049,45 @@ INDEX_HTML = r"""<!doctype html>
 
     function role(panel, name) {
       return panel.querySelector(`[data-role="${name}"]`);
+    }
+
+    function updateText(panel, name, text) {
+      const el = role(panel, name);
+      if (el) el.textContent = text;
+    }
+
+    function applyPanelProfile(panel) {
+      const profile = profiles[activeProfile] || profiles.custom;
+      updateText(panel, "voltageLabel", profile.voltageLabel);
+      updateText(panel, "currentLabel", profile.currentLabel);
+      updateText(panel, "ovpLabel", profile.ovpLabel);
+      updateText(panel, "ocpLabel", profile.ocpLabel);
+      updateText(panel, "setVLabel", profile.setVLabel);
+      updateText(panel, "setILabel", profile.setILabel);
+    }
+
+    function applyProfile(name, updateConnection = true) {
+      activeProfile = profiles[name] ? name : "hv";
+      $("profile").value = activeProfile;
+      const profile = profiles[activeProfile];
+      $("supplyName").textContent = profile.label;
+      document.title = `${profile.label} - Rigol DP900 Control`;
+      if (updateConnection && activeProfile !== "custom") {
+        $("mode").value = profile.mode;
+        $("host").value = profile.host;
+        $("port").value = profile.port;
+        $("resource").value = profile.resource;
+      }
+      for (const panel of panels.values()) applyPanelProfile(panel);
+      if (activeProfile === "cec") {
+        message("CEC current-control layout selected.");
+      }
+    }
+
+    function selectCustomProfile() {
+      if ($("profile").value !== "custom") {
+        applyProfile("custom", false);
+      }
     }
 
     function syncLimits(panel, channel) {
@@ -1072,6 +1159,7 @@ INDEX_HTML = r"""<!doctype html>
       for (const channel of channels) {
         const node = template.content.firstElementChild.cloneNode(true);
         role(node, "title").textContent = `${channel} ${channel === "CH3" ? "6 V / 3 A" : "32 V / 3 A"}`;
+        applyPanelProfile(node);
         syncLimits(node, channel);
         node.querySelectorAll("input[data-role]").forEach((input) => {
           input.dataset.dirty = "false";
@@ -1119,7 +1207,8 @@ INDEX_HTML = r"""<!doctype html>
         });
         clearDirty(panel);
         applyStatus(data);
-        message(`${channel} CV setup applied.`);
+        const profile = profiles[activeProfile] || profiles.custom;
+        message(`${channel} ${profile.applyText}`);
       } catch (err) {
         message(`${channel}: ${err.message}`, true);
       }
@@ -1223,6 +1312,15 @@ INDEX_HTML = r"""<!doctype html>
     $("refreshAll").addEventListener("click", () => refreshAll(true, false));
     $("allOff").addEventListener("click", allOff);
     buildPanels();
+    $("profile").addEventListener("change", () => applyProfile($("profile").value, true));
+    $("mode").addEventListener("change", selectCustomProfile);
+    $("host").addEventListener("input", selectCustomProfile);
+    $("port").addEventListener("input", selectCustomProfile);
+    $("resource").addEventListener("input", selectCustomProfile);
+    const initialPath = window.location.pathname.toLowerCase();
+    const initialProfile = new URLSearchParams(window.location.search).get("profile");
+    const pathProfile = initialPath === "/cec" ? "cec" : (initialPath === "/hv" ? "hv" : null);
+    applyProfile(pathProfile || initialProfile || "hv", true);
   </script>
 </body>
 </html>

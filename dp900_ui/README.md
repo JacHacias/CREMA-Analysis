@@ -16,13 +16,21 @@ Open:
 http://127.0.0.1:8765
 ```
 
-The UI defaults to LAN socket mode for the DP932A at `192.168.1.181`, port `5555`.
+Use the labeled supply links:
+
+```text
+http://127.0.0.1:8765/hv
+http://127.0.0.1:8765/cec
+```
+
+The HV profile defaults to LAN socket mode for the DP932A at `192.168.1.181`, port `5555`.
+The CEC profile defaults to VISA USB mode at `USB0::0x1AB1::0xA4A8::DP9A282M00021::INSTR` and labels current as the setpoint with voltage as the compliance limit.
 
 ## Main Controls
 
 - Control `CH1`, `CH2`, and `CH3` from separate panels.
-- Set each channel's CV voltage setpoint.
-- Set each channel's current limit.
+- In the HV profile, set each channel's CV voltage setpoint and current limit.
+- In the CEC profile, set each channel's current setpoint and voltage compliance limit.
 - Set each channel's OVP and OCP protection limits. The app enables both protections when applying the setup.
 - Turn each output on/off independently, or use `All Off`.
 - Read back each channel's measured voltage, current, power, setpoints, output state, CV/CC/UR/OFF mode, and OVP/OCP alarm state.
