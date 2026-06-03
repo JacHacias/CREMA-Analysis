@@ -78,11 +78,27 @@ class VisaTransport(Transport):
         self._inst.read_termination = "\n"
         self._inst.query_delay = 0.05
         try:
-            self._inst.clear()
+            self.clear()
             time.sleep(0.1)
         except Exception:
             pass
         self.label = f"VISA {resource}"
+
+    def clear(self) -> None:
+        try:
+            self._inst.clear()
+        except Exception:
+            pass
+        old_timeout = self._inst.timeout
+        self._inst.timeout = 100
+        try:
+            for _ in range(8):
+                try:
+                    self._inst.read()
+                except Exception:
+                    break
+        finally:
+            self._inst.timeout = old_timeout
 
     def write(self, command: str) -> None:
         self._inst.write(command.strip())
@@ -97,7 +113,7 @@ class VisaTransport(Transport):
                 if attempt:
                     break
                 try:
-                    self._inst.clear()
+                    self.clear()
                     time.sleep(0.15)
                 except Exception:
                     time.sleep(0.15)
@@ -232,6 +248,13 @@ class DP900Controller:
                 raise InstrumentError(f"Unknown connection mode: {mode}")
             try:
                 idn = self.query("*IDN?")
+                if mode in {"tcp", "visa"} and "RIGOL" not in idn.upper():
+                    if isinstance(self.transport, VisaTransport):
+                        self.transport.clear()
+                    time.sleep(0.1)
+                    idn = self.query("*IDN?")
+                if mode in {"tcp", "visa"} and "RIGOL" not in idn.upper():
+                    raise InstrumentError(f"Unexpected IDN response from instrument: {idn}")
             except Exception:
                 self.disconnect()
                 raise
@@ -1136,6 +1159,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     let activeProfile = "hv";
     let timer = null;
+    const pollDelayMs = 3000;
 
     async function api(path, body) {
       const url = body === undefined && path.startsWith("/api/")
@@ -1277,6 +1301,20 @@ INDEX_HTML = r"""<!doctype html>
         input.dataset.dirty = "false";
         input.classList.remove("dirty");
       });
+    }
+
+    function stopPolling() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    }
+
+    function startPolling() {
+      stopPolling();
+      const tick = async () => {
+        const connected = await refreshAll(false, true);
+        timer = connected ? setTimeout(tick, pollDelayMs) : null;
+      };
+      timer = setTimeout(tick, pollDelayMs);
     }
 
     function buildPanels() {
@@ -1425,22 +1463,24 @@ INDEX_HTML = r"""<!doctype html>
         message("Connected.");
         const refreshed = await refreshAll(true, true);
         if (!refreshed) message("Connected, but readback failed. Try Refresh All.", true);
-        clearInterval(timer);
-        timer = setInterval(() => refreshAll(false, true), 1000);
+        if (refreshed) startPolling();
       } catch (err) {
         message(err.message, true);
       }
     });
 
     $("disconnect").addEventListener("click", async () => {
-      clearInterval(timer);
-      timer = null;
+      stopPolling();
       await api("/api/disconnect", {});
       setConnectionState(false);
       message("Disconnected.");
     });
 
-    $("refreshAll").addEventListener("click", () => refreshAll(true, false));
+    $("refreshAll").addEventListener("click", async () => {
+      stopPolling();
+      const connected = await refreshAll(true, false);
+      if (connected) startPolling();
+    });
     $("allOff").addEventListener("click", allOff);
     buildPanels();
     $("profile").addEventListener("change", () => applyProfile($("profile").value, true));
@@ -1453,7 +1493,7 @@ INDEX_HTML = r"""<!doctype html>
     const pathProfile = initialPath === "/cec" ? "cec" : (initialPath === "/hv" ? "hv" : null);
     applyProfile(pathProfile || initialProfile || "hv", true);
     refreshAll(false, true).then((connected) => {
-      if (connected) timer = setInterval(() => refreshAll(false, true), 1000);
+      if (connected) startPolling();
     });
   </script>
 </body>
