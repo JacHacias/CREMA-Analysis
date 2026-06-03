@@ -210,7 +210,7 @@ class SimulatedTransport(Transport):
 
 class DP900Controller:
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.transport: Transport | None = None
         self._ramp_stop: dict[str, threading.Event] = {}
         self._ramp_threads: dict[str, threading.Thread] = {}
@@ -261,12 +261,13 @@ class DP900Controller:
             return {"connected": True, "label": self.transport.label, "idn": idn}
 
     def disconnect(self) -> None:
-        for channel in CHANNELS:
-            self._cancel_ramp(channel)
-            self.cancel_schedule(channel)
-        if self.transport:
-            self.transport.close()
-            self.transport = None
+        with self._lock:
+            for channel in CHANNELS:
+                self._cancel_ramp(channel)
+                self.cancel_schedule(channel)
+            if self.transport:
+                self.transport.close()
+                self.transport = None
 
     def write(self, command: str) -> None:
         if not self.transport:
@@ -1115,6 +1116,7 @@ INDEX_HTML = r"""<!doctype html>
         host: "192.168.1.181",
         port: 5555,
         resource: "",
+        timeout: 2,
         rampAxis: "voltage",
         applyText: "CV setup applied.",
         voltageLabel: "Voltage setpoint (V)",
@@ -1132,6 +1134,7 @@ INDEX_HTML = r"""<!doctype html>
         host: "",
         port: 5555,
         resource: "USB0::0x1AB1::0xA4A8::DP9A282M00021::INSTR",
+        timeout: 5,
         rampAxis: "current",
         applyText: "current setup applied.",
         voltageLabel: "Voltage compliance (V)",
@@ -1145,6 +1148,7 @@ INDEX_HTML = r"""<!doctype html>
       },
       custom: {
         label: "Custom",
+        timeout: 2,
         rampAxis: "voltage",
         applyText: "setup applied.",
         voltageLabel: "Voltage setpoint / compliance (V)",
@@ -1457,13 +1461,11 @@ INDEX_HTML = r"""<!doctype html>
           host: $("host").value,
           port: Number($("port").value),
           resource: $("resource").value,
-          timeout: 2,
+          timeout: (profiles[activeProfile] || profiles.custom).timeout,
         });
         setConnectionState(true, `${data.label} - ${data.idn}`);
         message("Connected.");
-        const refreshed = await refreshAll(true, true);
-        if (!refreshed) message("Connected, but readback failed. Try Refresh All.", true);
-        if (refreshed) startPolling();
+        startPolling();
       } catch (err) {
         message(err.message, true);
       }
