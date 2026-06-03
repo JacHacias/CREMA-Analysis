@@ -30,8 +30,8 @@ The server keeps independent backend connections for the HV and CEC profiles, so
 ## Main Controls
 
 - Control `CH1`, `CH2`, and `CH3` from separate panels.
-- In the HV profile, set each channel's CV voltage setpoint and current limit.
-- In the CEC profile, set each channel's current setpoint and voltage compliance limit.
+- In the HV profile, set each channel's CV voltage setpoint and current limit. Ramp controls change the voltage setpoint in V/s.
+- In the CEC profile, set each channel's current setpoint and voltage compliance limit. Ramp controls change the current setpoint in A/s.
 - Set each channel's OVP and OCP protection limits. The app enables both protections when applying the setup.
 - Turn each output on/off independently, or use `All Off`.
 - Read back each channel's measured voltage, current, power, setpoints, output state, CV/CC/UR/OFF mode, and OVP/OCP alarm state.

@@ -242,32 +242,39 @@ class DP900Controller:
         output: bool,
         ramp_rate: float = 0.2,
         ramp_seconds: float | None = None,
+        ramp_axis: str = "voltage",
     ) -> None:
         ch = _normalize_channel(channel)
         n = CHANNELS[ch]
         _validate_limits(ch, voltage, current, ovp, ocp)
         if ramp_rate < 0:
             raise InstrumentError("Ramp rate must be 0 or greater.")
+        axis = _normalize_ramp_axis(ramp_axis)
         self._cancel_ramp(ch)
         with self._lock:
             output_is_on = self._output_state(ch)
-            start_voltage = _float_query(self.query(f":SOUR{n}:VOLT?"))
-            effective_ramp_rate = _effective_ramp_rate(start_voltage, voltage, ramp_rate, ramp_seconds)
-            self.write(f":SOUR{n}:CURR {current:.6g}")
+            start_value = _float_query(self.query(f":SOUR{n}:{'CURR' if axis == 'current' else 'VOLT'}?"))
+            target_value = current if axis == "current" else voltage
+            source = "CURR" if axis == "current" else "VOLT"
+            effective_ramp_rate = _effective_ramp_rate(start_value, target_value, ramp_rate, ramp_seconds)
+            if axis == "current":
+                self.write(f":SOUR{n}:VOLT {voltage:.6g}")
+            else:
+                self.write(f":SOUR{n}:CURR {current:.6g}")
             self.write(f":OUTP:OVP:VAL {ch},{ovp:.6g}")
             self.write(f":OUTP:OCP:VAL {ch},{ocp:.6g}")
             self.write(f":OUTP:OVP {ch},ON")
             self.write(f":OUTP:OCP {ch},ON")
             if not output:
-                self.write(f":SOUR{n}:VOLT {voltage:.6g}")
+                self.write(f":SOUR{n}:{source} {target_value:.6g}")
                 self.write(f":OUTP {ch},OFF")
                 return
             if not output_is_on:
-                start_voltage = 0.0
-                self.write(f":SOUR{n}:VOLT 0")
+                start_value = 0.0
+                self.write(f":SOUR{n}:{source} 0")
                 self.write(f":OUTP {ch},ON")
-                effective_ramp_rate = _effective_ramp_rate(start_voltage, voltage, ramp_rate, ramp_seconds)
-        self._start_ramp(ch, n, start_voltage, voltage, effective_ramp_rate)
+                effective_ramp_rate = _effective_ramp_rate(start_value, target_value, ramp_rate, ramp_seconds)
+        self._start_ramp(ch, n, start_value, target_value, effective_ramp_rate, source)
 
     def set_output(
         self,
@@ -275,19 +282,22 @@ class DP900Controller:
         output: bool,
         ramp_rate: float = 0.2,
         ramp_seconds: float | None = None,
+        ramp_axis: str = "voltage",
     ) -> None:
         ch = _normalize_channel(channel)
         n = CHANNELS[ch]
+        axis = _normalize_ramp_axis(ramp_axis)
+        source = "CURR" if axis == "current" else "VOLT"
         self._cancel_ramp(ch)
         with self._lock:
             if output:
-                target_voltage = _float_query(self.query(f":SOUR{n}:VOLT?"))
+                target_value = _float_query(self.query(f":SOUR{n}:{source}?"))
                 is_already_on = self._output_state(ch)
-                if not is_already_on and target_voltage > 0 and ramp_rate > 0:
-                    effective_ramp_rate = _effective_ramp_rate(0.0, target_voltage, ramp_rate, ramp_seconds)
-                    self.write(f":SOUR{n}:VOLT 0")
+                if not is_already_on and target_value > 0 and ramp_rate > 0:
+                    effective_ramp_rate = _effective_ramp_rate(0.0, target_value, ramp_rate, ramp_seconds)
+                    self.write(f":SOUR{n}:{source} 0")
                     self.write(f":OUTP {ch},ON")
-                    self._start_ramp(ch, n, 0.0, target_voltage, effective_ramp_rate)
+                    self._start_ramp(ch, n, 0.0, target_value, effective_ramp_rate, source)
                     return
             self.write(f":OUTP {ch},{'ON' if output else 'OFF'}")
 
@@ -311,16 +321,20 @@ class DP900Controller:
         output: bool,
         ramp_rate: float,
         ramp_seconds: float | None = None,
+        ramp_axis: str = "voltage",
     ) -> dict[str, Any]:
         ch = _normalize_channel(channel)
         _validate_limits(ch, voltage, current, ovp, ocp)
+        axis = _normalize_ramp_axis(ramp_axis)
         ready_time = _parse_ready_time(ready_time_text)
 
         with self._lock:
-            current_voltage = _float_query(self.query(f":SOUR{CHANNELS[ch]}:VOLT?")) if self.connected else 0.0
+            source = "CURR" if axis == "current" else "VOLT"
+            current_value = _float_query(self.query(f":SOUR{CHANNELS[ch]}:{source}?")) if self.connected else 0.0
 
-        effective_ramp_rate = _effective_ramp_rate(current_voltage, voltage, ramp_rate, ramp_seconds)
-        required_seconds = abs(voltage - current_voltage) / effective_ramp_rate if effective_ramp_rate > 0 else 0
+        target_value = current if axis == "current" else voltage
+        effective_ramp_rate = _effective_ramp_rate(current_value, target_value, ramp_rate, ramp_seconds)
+        required_seconds = abs(target_value - current_value) / effective_ramp_rate if effective_ramp_rate > 0 else 0
         start_at = ready_time - timedelta(seconds=required_seconds)
         if start_at <= datetime.now():
             raise InstrumentError("Ready time is too soon for the requested ramp. Choose a later time or a faster ramp rate.")
@@ -336,6 +350,7 @@ class DP900Controller:
             "output": output,
             "rampRate": effective_ramp_rate,
             "rampSeconds": ramp_seconds,
+            "rampAxis": axis,
         }
         with self._schedule_lock:
             self._scheduled[ch] = payload
@@ -434,14 +449,14 @@ class DP900Controller:
         self._ramping[channel] = False
         self._ramp_target[channel] = None
 
-    def _start_ramp(self, channel: str, channel_number: int, start_voltage: float, target_voltage: float, ramp_rate: float) -> None:
-        if abs(target_voltage - start_voltage) < 1e-9:
+    def _start_ramp(self, channel: str, channel_number: int, start_value: float, target_value: float, ramp_rate: float, source: str = "VOLT") -> None:
+        if abs(target_value - start_value) < 1e-9:
             self._ramping[channel] = False
             self._ramp_target[channel] = None
             return
         if ramp_rate == 0:
             with self._lock:
-                self.write(f":SOUR{channel_number}:VOLT {target_voltage:.6g}")
+                self.write(f":SOUR{channel_number}:{source} {target_value:.6g}")
             self._ramping[channel] = False
             self._ramp_target[channel] = None
             return
@@ -449,29 +464,29 @@ class DP900Controller:
         stop_event = threading.Event()
         self._ramp_stop[channel] = stop_event
         self._ramping[channel] = True
-        self._ramp_target[channel] = target_voltage
+        self._ramp_target[channel] = target_value
 
         def worker() -> None:
             interval_s = 0.1
-            step_v = max(ramp_rate * interval_s, 0.001)
-            current_voltage = start_voltage
-            direction = 1.0 if target_voltage > start_voltage else -1.0
+            step_value = max(ramp_rate * interval_s, 0.001)
+            current_value = start_value
+            direction = 1.0 if target_value > start_value else -1.0
             try:
                 while not stop_event.is_set():
-                    next_voltage = current_voltage + direction * step_v
-                    if (direction > 0 and next_voltage >= target_voltage) or (direction < 0 and next_voltage <= target_voltage):
+                    next_value = current_value + direction * step_value
+                    if (direction > 0 and next_value >= target_value) or (direction < 0 and next_value <= target_value):
                         break
-                    current_voltage = next_voltage
+                    current_value = next_value
                     with self._lock:
                         if not self.transport:
                             return
-                        self.write(f":SOUR{channel_number}:VOLT {current_voltage:.6g}")
+                        self.write(f":SOUR{channel_number}:{source} {current_value:.6g}")
                     time.sleep(interval_s)
                 if not stop_event.is_set():
                     with self._lock:
                         if not self.transport:
                             return
-                        self.write(f":SOUR{channel_number}:VOLT {target_voltage:.6g}")
+                        self.write(f":SOUR{channel_number}:{source} {target_value:.6g}")
             finally:
                 if self._ramp_stop.get(channel) is stop_event:
                     self._ramping[channel] = False
@@ -501,6 +516,7 @@ class DP900Controller:
                         bool(item["output"]),
                         float(item["rampRate"]),
                         item.get("rampSeconds"),
+                        item.get("rampAxis", "voltage"),
                     )
                 except Exception:
                     pass
@@ -523,6 +539,13 @@ def _normalize_channel(channel: str) -> str:
     if ch not in CHANNELS:
         raise InstrumentError("Channel must be CH1, CH2, or CH3.")
     return ch
+
+
+def _normalize_ramp_axis(axis: str) -> str:
+    normalized = str(axis or "voltage").strip().lower()
+    if normalized not in {"voltage", "current"}:
+        raise InstrumentError("Ramp axis must be voltage or current.")
+    return normalized
 
 
 def _channel_from_command(command: str) -> str:
@@ -654,6 +677,7 @@ class Handler(BaseHTTPRequestHandler):
             bool(data.get("output", False)),
             float(data.get("rampRate", 0.2)),
             float(data["rampSeconds"]) if str(data.get("rampSeconds", "")).strip() else None,
+            str(data.get("rampAxis", "voltage")),
         )
         return controller.status(str(data.get("channel", "CH1")))
 
@@ -666,6 +690,7 @@ class Handler(BaseHTTPRequestHandler):
             bool(data.get("output", False)),
             float(data.get("rampRate", 0.2)),
             float(data["rampSeconds"]) if str(data.get("rampSeconds", "")).strip() else None,
+            str(data.get("rampAxis", "voltage")),
         )
         return controller.status(channel)
 
@@ -689,6 +714,7 @@ class Handler(BaseHTTPRequestHandler):
             bool(data.get("output", True)),
             float(data.get("rampRate", 0.2)),
             float(data["rampSeconds"]) if str(data.get("rampSeconds", "")).strip() else None,
+            str(data.get("rampAxis", "voltage")),
         )
         return controller.status(str(data.get("channel", "CH1")))
 
@@ -921,7 +947,7 @@ INDEX_HTML = r"""<!doctype html>
   <main>
     <header>
       <div>
-        <h1>Rigol DP900 Control <span id="supplyName">HV</span></h1>
+        <h1><strong id="supplyName">HV</strong></h1>
         <div class="muted" id="identity">Disconnected</div>
       </div>
       <span class="pill" id="connectionState">Offline</span>
@@ -931,8 +957,8 @@ INDEX_HTML = r"""<!doctype html>
       <div class="connection-grid">
         <label>Supply profile
           <select id="profile">
-            <option value="hv">HV Rigol</option>
-            <option value="cec">CEC Rigol</option>
+            <option value="hv">HV</option>
+            <option value="cec">CEC</option>
             <option value="custom">Custom</option>
           </select>
         </label>
@@ -1032,15 +1058,16 @@ INDEX_HTML = r"""<!doctype html>
     const panels = new Map();
     const profiles = {
       hv: {
-        label: "HV Rigol",
+        label: "HV",
         mode: "tcp",
         host: "192.168.1.181",
         port: 5555,
         resource: "",
+        rampAxis: "voltage",
         applyText: "CV setup applied.",
         voltageLabel: "Voltage setpoint (V)",
-        rampRateLabel: "Ramp rate (V/s)",
-        rampSecondsLabel: "Ramp interval (s)",
+        rampRateLabel: "Voltage ramp (V/s)",
+        rampSecondsLabel: "Voltage ramp interval (s)",
         currentLabel: "Current limit (A)",
         ovpLabel: "OVP limit (V)",
         ocpLabel: "OCP limit (A)",
@@ -1048,15 +1075,16 @@ INDEX_HTML = r"""<!doctype html>
         setILabel: "Limit I",
       },
       cec: {
-        label: "CEC Rigol",
+        label: "CEC",
         mode: "visa",
         host: "",
         port: 5555,
         resource: "USB0::0x1AB1::0xA4A8::DP9A282M00021::INSTR",
+        rampAxis: "current",
         applyText: "current setup applied.",
         voltageLabel: "Voltage compliance (V)",
-        rampRateLabel: "Voltage compliance ramp (V/s)",
-        rampSecondsLabel: "Compliance ramp interval (s)",
+        rampRateLabel: "Current ramp (A/s)",
+        rampSecondsLabel: "Current ramp interval (s)",
         currentLabel: "Current setpoint (A)",
         ovpLabel: "Voltage trip limit (V)",
         ocpLabel: "Current trip limit (A)",
@@ -1065,6 +1093,7 @@ INDEX_HTML = r"""<!doctype html>
       },
       custom: {
         label: "Custom",
+        rampAxis: "voltage",
         applyText: "setup applied.",
         voltageLabel: "Voltage setpoint / compliance (V)",
         rampRateLabel: "Ramp rate (V/s)",
@@ -1133,7 +1162,7 @@ INDEX_HTML = r"""<!doctype html>
       $("profile").value = activeProfile;
       const profile = profiles[activeProfile];
       $("supplyName").textContent = profile.label;
-      document.title = `${profile.label} - Rigol DP900 Control`;
+      document.title = `${profile.label} DP900`;
       if (updateConnection && activeProfile !== "custom") {
         $("mode").value = profile.mode;
         $("host").value = profile.host;
@@ -1262,6 +1291,7 @@ INDEX_HTML = r"""<!doctype html>
           voltage: Number(role(panel, "voltage").value),
           rampRate: Number(role(panel, "rampRate").value),
           rampSeconds: role(panel, "rampSeconds").value,
+          rampAxis: (profiles[activeProfile] || profiles.custom).rampAxis,
           current: Number(role(panel, "current").value),
           ovp: Number(role(panel, "ovp").value),
           ocp: Number(role(panel, "ocp").value),
@@ -1284,6 +1314,7 @@ INDEX_HTML = r"""<!doctype html>
           output,
           rampRate: Number(role(panel, "rampRate").value),
           rampSeconds: role(panel, "rampSeconds").value,
+          rampAxis: (profiles[activeProfile] || profiles.custom).rampAxis,
         });
         applyStatus(data);
         message(`${channel} output ${output ? "enabled" : "disabled"}.`);
@@ -1311,6 +1342,7 @@ INDEX_HTML = r"""<!doctype html>
           voltage: Number(role(panel, "voltage").value),
           rampRate: Number(role(panel, "rampRate").value),
           rampSeconds: role(panel, "rampSeconds").value,
+          rampAxis: (profiles[activeProfile] || profiles.custom).rampAxis,
           current: Number(role(panel, "current").value),
           ovp: Number(role(panel, "ovp").value),
           ocp: Number(role(panel, "ocp").value),
