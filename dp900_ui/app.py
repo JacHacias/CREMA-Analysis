@@ -76,13 +76,32 @@ class VisaTransport(Transport):
         self._inst.timeout = int(timeout * 1000)
         self._inst.write_termination = "\n"
         self._inst.read_termination = "\n"
+        self._inst.query_delay = 0.05
+        try:
+            self._inst.clear()
+            time.sleep(0.1)
+        except Exception:
+            pass
         self.label = f"VISA {resource}"
 
     def write(self, command: str) -> None:
         self._inst.write(command.strip())
 
     def query(self, command: str) -> str:
-        return str(self._inst.query(command.strip())).strip()
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                return str(self._inst.query(command.strip())).strip()
+            except Exception as exc:
+                last_error = exc
+                if attempt:
+                    break
+                try:
+                    self._inst.clear()
+                    time.sleep(0.15)
+                except Exception:
+                    time.sleep(0.15)
+        raise InstrumentError(str(last_error))
 
     def close(self) -> None:
         self._inst.close()
@@ -211,7 +230,11 @@ class DP900Controller:
                 self.transport = SimulatedTransport()
             else:
                 raise InstrumentError(f"Unknown connection mode: {mode}")
-            idn = self.query("*IDN?")
+            try:
+                idn = self.query("*IDN?")
+            except Exception:
+                self.disconnect()
+                raise
             return {"connected": True, "label": self.transport.label, "idn": idn}
 
     def disconnect(self) -> None:
@@ -436,6 +459,12 @@ class DP900Controller:
         return "CV"
 
     def status_all(self) -> dict[str, Any]:
+        if not self.connected:
+            return {
+                "connected": False,
+                "label": "Disconnected",
+                "channels": [],
+            }
         return {
             "connected": self.connected,
             "label": self.transport.label if self.transport else "Disconnected",
@@ -1195,6 +1224,12 @@ INDEX_HTML = r"""<!doctype html>
       el.className = `pill ${cls}`.trim();
     }
 
+    function setConnectionState(connected, label = "Disconnected") {
+      $("identity").textContent = label;
+      $("connectionState").textContent = connected ? "Online" : "Offline";
+      $("connectionState").className = connected ? "pill on" : "pill";
+    }
+
     function applyStatus(data) {
       const panel = panels.get(data.channel);
       if (!panel) return;
@@ -1270,16 +1305,21 @@ INDEX_HTML = r"""<!doctype html>
     async function refreshAll(clearPending = false, silent = false) {
       try {
         const data = await api("/api/status_all");
-        $("identity").textContent = data.label || "Connected";
-        $("connectionState").textContent = "Online";
-        $("connectionState").className = "pill on";
+        if (!data.connected) {
+          setConnectionState(false);
+          if (!silent) message("Disconnected.");
+          return false;
+        }
+        setConnectionState(true, data.label || "Connected");
         if (clearPending) {
           for (const panel of panels.values()) clearDirty(panel);
         }
         for (const status of data.channels) applyStatus(status);
         if (!silent) message("All channels updated.");
+        return true;
       } catch (err) {
-        message(err.message, true);
+        if (!silent) message(err.message, true);
+        return false;
       }
     }
 
@@ -1381,13 +1421,12 @@ INDEX_HTML = r"""<!doctype html>
           resource: $("resource").value,
           timeout: 2,
         });
-        $("identity").textContent = `${data.label} - ${data.idn}`;
-        $("connectionState").textContent = "Online";
-        $("connectionState").className = "pill on";
+        setConnectionState(true, `${data.label} - ${data.idn}`);
         message("Connected.");
-        await refreshAll(true, false);
+        const refreshed = await refreshAll(true, true);
+        if (!refreshed) message("Connected, but readback failed. Try Refresh All.", true);
         clearInterval(timer);
-        timer = setInterval(() => refreshAll(false, true), 300);
+        timer = setInterval(() => refreshAll(false, true), 1000);
       } catch (err) {
         message(err.message, true);
       }
@@ -1397,9 +1436,7 @@ INDEX_HTML = r"""<!doctype html>
       clearInterval(timer);
       timer = null;
       await api("/api/disconnect", {});
-      $("identity").textContent = "Disconnected";
-      $("connectionState").textContent = "Offline";
-      $("connectionState").className = "pill";
+      setConnectionState(false);
       message("Disconnected.");
     });
 
@@ -1415,6 +1452,9 @@ INDEX_HTML = r"""<!doctype html>
     const initialProfile = new URLSearchParams(window.location.search).get("profile");
     const pathProfile = initialPath === "/cec" ? "cec" : (initialPath === "/hv" ? "hv" : null);
     applyProfile(pathProfile || initialProfile || "hv", true);
+    refreshAll(false, true).then((connected) => {
+      if (connected) timer = setInterval(() => refreshAll(false, true), 1000);
+    });
   </script>
 </body>
 </html>
