@@ -417,50 +417,39 @@ def plot_uncertainty_analysis(result: dict[str, Any], path: str | Path) -> None:
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, axis="y", alpha=0.25)
 
-    # Right panel: compare the run-to-run distribution against the model's predictive
-    # spread, and show the (much narrower) precision of the shared shift separately.
-    group_values = [g["value_MHz"] for g in groups]
-    if group_values and freq:
-        lo = min(group_values)
-        hi = max(group_values)
-        mean_sigma2 = float(np.mean(np.square([g["sigma_MHz"] for g in groups])))
-        run_scatter = max(float(freq.get("weighted_std_MHz", 0.0)), math.sqrt(mean_sigma2))
-        tau = float(bayes.get("sigma_extra_mean_MHz", 0.0)) if bayes.get("available") else 0.0
-        pred_sigma = math.sqrt(mean_sigma2 + tau ** 2)
-        pad = max(25.0, 1.5 * max(run_scatter, pred_sigma), 0.6 * (hi - lo if hi > lo else 1.0))
-        x = np.linspace(lo - pad, hi + pad, 600)
+    # Right panel: do the two methods agree on the shared shift? Both curves describe
+    # the *mean* (not the run scatter): the frequentist sampling distribution of the
+    # weighted mean vs the Bayesian posterior of mu. They should overlap.
+    if freq:
+        mean = float(freq["weighted_mean_MHz"])
+        sem = float(freq["weighted_scatter_sem_MHz"])
+        bayes_ok = bool(bayes and bayes.get("available"))
+        mu_grid = np.asarray(bayes.get("mu_grid_MHz", []), dtype=float) if bayes_ok else np.asarray([])
+        mu_density = np.asarray(bayes.get("mu_density", []), dtype=float) if bayes_ok else np.asarray([])
 
-        if len(group_values) >= 2:
-            dens.hist(
-                group_values,
-                bins=min(8, max(3, len(group_values))),
-                density=True,
-                alpha=0.18,
-                color="#1f9d45",
-                label="independent runs",
-            )
+        spread_terms = [3.5 * sem]
+        if bayes_ok:
+            spread_terms.append(3.5 * float(bayes["mu_sd_MHz"]))
+        pad = max(spread_terms) if spread_terms else 10.0
+        x = np.linspace(mean - pad, mean + pad, 600)
+
+        if bayes_ok and mu_grid.size and mu_density.size:
+            dens.fill_between(mu_grid, mu_density, color="#1f9d45", alpha=0.30, label="Bayesian posterior")
+            dens.plot(mu_grid, mu_density, color="#1f9d45", linewidth=1.2)
+            dens.axvline(float(bayes["mu_mean_MHz"]), color="#1f9d45", linestyle=":", linewidth=1.2)
         dens.plot(
             x,
-            normal_pdf(x, float(freq["weighted_mean_MHz"]), run_scatter),
-            color="#313131",
-            linestyle="--",
-            label="freq run scatter",
+            normal_pdf(x, mean, sem),
+            color="#c0392b",
+            linewidth=1.8,
+            label=f"frequentist {mean:.2f} +/- {sem:.2f}",
         )
-        if bayes and bayes.get("available"):
-            dens.plot(
-                x,
-                normal_pdf(x, float(bayes["mu_mean_MHz"]), pred_sigma),
-                color="#7b2cbf",
-                label="Bayes posterior predictive",
-            )
-            mu = float(bayes["mu_mean_MHz"])
-            sd = float(bayes["mu_sd_MHz"])
-            dens.axvspan(mu - sd, mu + sd, color="#7b2cbf", alpha=0.18)
-            dens.axvline(mu, color="#7b2cbf", linewidth=1.2, label="shared shift +/- sd")
-    dens.set_title("Run distribution vs shared shift")
-    dens.set_xlabel("Isotope shift (MHz)")
+        dens.axvline(mean, color="#c0392b", linestyle="--", linewidth=1.0)
+        dens.set_xlim(mean - pad, mean + pad)
+    dens.set_title("Frequentist propagation vs Bayesian posterior")
+    dens.set_xlabel(f"Shared isotope shift {comparison} (MHz)")
     dens.set_ylabel("Density")
-    dens.legend(loc="best", fontsize=8)
+    dens.legend(loc="best", fontsize=9)
     dens.grid(True, alpha=0.25)
 
     n_rows = result.get("n_included_rows", len(included))
