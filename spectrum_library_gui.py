@@ -1338,12 +1338,15 @@ def render_page() -> bytes:
       const freq = data.frequentist || {{}};
       const bayes = data.bayesian || {{}};
       uncSummary.innerHTML = `
-        <div class="summary-card"><strong>${{data.included.length}}</strong><span>included rows</span></div>
+        <div class="summary-card"><strong>${{(data.n_included_rows != null ? data.n_included_rows : data.included.length)}} &rarr; ${{(data.n_independent_runs != null ? data.n_independent_runs : '?')}}</strong><span>included rows &rarr; independent runs</span></div>
         <div class="summary-card"><strong>${{data.excluded.length}}</strong><span>excluded rows</span></div>
-        <div class="summary-card"><strong>${{fmt(freq.weighted_mean_MHz)}} +/- ${{fmt(freq.weighted_scatter_sem_MHz)}}</strong><span>weighted mean +/- scatter SEM MHz</span></div>
+        <div class="summary-card"><strong>${{fmt(freq.weighted_mean_MHz)}} +/- ${{fmt(freq.weighted_scatter_sem_MHz)}}</strong><span>weighted mean +/- stat SEM MHz</span></div>
+        <div class="summary-card"><strong>${{fmt(data.systematic_unc_MHz)}}</strong><span>correlated HV systematic MHz</span></div>
+        <div class="summary-card"><strong>${{fmt(freq.total_unc_MHz)}}</strong><span>freq total unc (stat (+) sys) MHz</span></div>
         <div class="summary-card"><strong>${{fmt(freq.chi2_red)}}</strong><span>reduced chi-squared</span></div>
-        <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.mu_mean_MHz) + ' +/- ' + fmt(bayes.mu_sd_MHz) : 'n/a'}}</strong><span>Bayesian shared shift MHz</span></div>
-        <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.sigma_extra_mean_MHz) : 'n/a'}}</strong><span>extra scatter MHz</span></div>
+        <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.mu_mean_MHz) + ' +/- ' + fmt(bayes.mu_sd_MHz) : 'n/a'}}</strong><span>Bayesian shared shift (stat) MHz</span></div>
+        <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.mu_total_unc_MHz) : 'n/a'}}</strong><span>Bayesian total unc MHz</span></div>
+        <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.sigma_extra_mean_MHz) : 'n/a'}}</strong><span>extra scatter (tau) MHz</span></div>
       `;
       uncPlot.innerHTML = data.plot_url ? `<figure><img src="${{data.plot_url}}" alt="Uncertainty propagation analysis plot"></figure>` : `<p class="empty">No uncertainty plot was generated. ${{data.plot_error || ''}}</p>`;
       const rowHtml = (row, state) => `

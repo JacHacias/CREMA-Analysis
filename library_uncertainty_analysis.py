@@ -79,6 +79,64 @@ def weighted_mean_with_scatter_sem(values: np.ndarray, sigmas: np.ndarray) -> di
     }
 
 
+_PAIR_SUFFIX_RE = re.compile(r"\s+(?:pair|bracket)\s+\d+\s*$", flags=re.IGNORECASE)
+
+
+def _run_group_key(view: dict[str, Any]) -> tuple[str, str]:
+    """Key identifying a single physical run, ignoring adjacent-pair/bracket splits."""
+    label = str(view.get("run_label", "") or "").strip()
+    prev = None
+    while label and label != prev:
+        prev = label
+        label = _PAIR_SUFFIX_RE.sub("", label).strip()
+    normalized = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+    fallback = str(view.get("analysis_id", "")) or str(view.get("collection_time", ""))
+    return (str(view.get("collection_date", "")), normalized or fallback)
+
+
+def collapse_runs(included: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Reduce rows that come from the same physical run to one independent point.
+
+    Adjacent-pair/bracket rows share scans and systematics, so treating each as an
+    independent measurement understates the combined uncertainty. Each group is
+    collapsed to its inverse-variance weighted mean; the group sigma is floored at
+    the typical single-pair fit uncertainty so it never shrinks below one
+    measurement's precision, and is widened to the within-run scatter when the
+    pairs disagree.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    order: list[tuple[str, str]] = []
+    for view in included:
+        key = _run_group_key(view)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(view)
+
+    collapsed: list[dict[str, Any]] = []
+    for key in order:
+        members = groups[key]
+        shifts = np.asarray([m["shift_MHz"] for m in members], dtype=float)
+        sigmas = np.asarray([m["fit_unc_MHz"] for m in members], dtype=float)
+        weights = 1.0 / np.square(sigmas)
+        value = float(np.sum(weights * shifts) / np.sum(weights))
+        typical_sigma = float(np.median(sigmas))
+        within_rms = float(math.sqrt(np.mean(np.square(shifts - value)))) if shifts.size > 1 else 0.0
+        group_sigma = max(typical_sigma, within_rms)
+        collapsed.append(
+            {
+                "value_MHz": value,
+                "sigma_MHz": group_sigma,
+                "n_rows": int(shifts.size),
+                "label": members[0].get("run_label") or members[0].get("collection_date") or key[1],
+                "collection_date": members[0].get("collection_date", ""),
+                "within_run_scatter_MHz": within_rms,
+                "analysis_ids": [m.get("analysis_id", "") for m in members],
+            }
+        )
+    return collapsed
+
+
 def bayesian_random_effects_grid(values: np.ndarray, sigmas: np.ndarray) -> dict[str, Any]:
     """Grid approximation to the notebook's Normal(mu, sqrt(sigma_i^2 + tau^2)) model."""
     if values.size == 0:
@@ -182,6 +240,7 @@ def _row_view(row: dict[str, Any], reasons: list[str]) -> dict[str, Any]:
         "shift_MHz": finite_or_none(safe_float(row.get("isotope_shift_MHz"))),
         "total_unc_MHz": finite_or_none(safe_float(row.get("isotope_shift_total_unc_MHz"))),
         "fit_unc_MHz": finite_or_none(safe_float(row.get("isotope_shift_fit_unc_MHz"))),
+        "voltage_unc_MHz": finite_or_none(safe_float(row.get("isotope_shift_voltage_unc_MHz"))),
         "num_points_reference": safe_int(row.get("num_points_reference")),
         "num_points_comparison": safe_int(row.get("num_points_comparison")),
         "files": files,
@@ -227,8 +286,21 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
         else:
             included.append(view)
 
-    values = np.asarray([row["shift_MHz"] for row in included], dtype=float)
-    sigmas = np.asarray([row["fit_unc_MHz"] for row in included], dtype=float)
+    groups = collapse_runs(included)
+    values = np.asarray([group["value_MHz"] for group in groups], dtype=float)
+    sigmas = np.asarray([group["sigma_MHz"] for group in groups], dtype=float)
+
+    # Correlated HV systematic: the per-run voltage uncertainty stems from a common
+    # beam-voltage uncertainty, so it does not average down with more runs. Carry the
+    # representative (mean) per-run value as a floor added in quadrature to the
+    # shared-shift uncertainty rather than folding it into the per-point weights.
+    voltage_uncs = [
+        float(row["voltage_unc_MHz"])
+        for row in included
+        if row.get("voltage_unc_MHz") is not None and math.isfinite(float(row["voltage_unc_MHz"]))
+    ]
+    systematic_unc = float(np.mean(voltage_uncs)) if voltage_uncs else 0.0
+
     result: dict[str, Any] = {
         "comparison": cuts.comparison,
         "cuts": {
@@ -240,12 +312,27 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
         },
         "included": included,
         "excluded": excluded,
+        "groups": groups,
+        "n_included_rows": len(included),
+        "n_independent_runs": len(groups),
+        "systematic_unc_MHz": systematic_unc,
         "frequentist": None,
         "bayesian": None,
     }
     if values.size:
-        result["frequentist"] = weighted_mean_with_scatter_sem(values, sigmas)
-        result["bayesian"] = bayesian_random_effects_grid(values, sigmas)
+        freq = weighted_mean_with_scatter_sem(values, sigmas)
+        freq["systematic_unc_MHz"] = systematic_unc
+        freq["total_unc_MHz"] = float(
+            math.sqrt(freq["weighted_scatter_sem_MHz"] ** 2 + systematic_unc ** 2)
+        )
+        result["frequentist"] = freq
+        bayes = bayesian_random_effects_grid(values, sigmas)
+        if bayes.get("available"):
+            bayes["systematic_unc_MHz"] = systematic_unc
+            bayes["mu_total_unc_MHz"] = float(
+                math.sqrt(bayes["mu_sd_MHz"] ** 2 + systematic_unc ** 2)
+            )
+        result["bayesian"] = bayes
     return result
 
 
@@ -303,39 +390,82 @@ def plot_uncertainty_analysis(result: dict[str, Any], path: str | Path) -> None:
 
     freq = result.get("frequentist") or {}
     bayes = result.get("bayesian") or {}
+    groups = result.get("groups") or []
+    sys_unc = float(result.get("systematic_unc_MHz", 0.0) or 0.0)
     if freq:
         mean = float(freq["weighted_mean_MHz"])
         sem = float(freq["weighted_scatter_sem_MHz"])
-        ax.axhline(mean, color="#313131", linestyle="--", linewidth=1.5, label=f"freq {mean:.2f} +/- {sem:.2f}")
+        freq_label = (
+            f"freq {mean:.2f} +/- {sem:.2f} (stat) +/- {sys_unc:.2f} (sys)"
+            if sys_unc > 0
+            else f"freq {mean:.2f} +/- {sem:.2f}"
+        )
+        ax.axhline(mean, color="#313131", linestyle="--", linewidth=1.5, label=freq_label)
         ax.axhspan(mean - sem, mean + sem, color="#313131", alpha=0.12)
     if bayes and bayes.get("available"):
         mu = float(bayes["mu_mean_MHz"])
         sd = float(bayes["mu_sd_MHz"])
-        ax.axhline(mu, color="#7b2cbf", linestyle="-.", linewidth=1.5, label=f"Bayes {mu:.2f} +/- {sd:.2f}")
+        bayes_label = (
+            f"Bayes {mu:.2f} +/- {sd:.2f} (stat) +/- {sys_unc:.2f} (sys)"
+            if sys_unc > 0
+            else f"Bayes {mu:.2f} +/- {sd:.2f}"
+        )
+        ax.axhline(mu, color="#7b2cbf", linestyle="-.", linewidth=1.5, label=bayes_label)
         ax.axhspan(mu - sd, mu + sd, color="#7b2cbf", alpha=0.09)
 
     ax.set_title(f"{comparison} inclusion barrier")
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, axis="y", alpha=0.25)
 
-    if all_values and freq:
-        lo = min(all_values)
-        hi = max(all_values)
-        pad = max(20.0, 0.25 * (hi - lo if hi > lo else 1.0))
+    # Right panel: compare the run-to-run distribution against the model's predictive
+    # spread, and show the (much narrower) precision of the shared shift separately.
+    group_values = [g["value_MHz"] for g in groups]
+    if group_values and freq:
+        lo = min(group_values)
+        hi = max(group_values)
+        mean_sigma2 = float(np.mean(np.square([g["sigma_MHz"] for g in groups])))
+        run_scatter = max(float(freq.get("weighted_std_MHz", 0.0)), math.sqrt(mean_sigma2))
+        tau = float(bayes.get("sigma_extra_mean_MHz", 0.0)) if bayes.get("available") else 0.0
+        pred_sigma = math.sqrt(mean_sigma2 + tau ** 2)
+        pad = max(25.0, 1.5 * max(run_scatter, pred_sigma), 0.6 * (hi - lo if hi > lo else 1.0))
         x = np.linspace(lo - pad, hi + pad, 600)
-        sigma = max(float(freq["weighted_scatter_sem_MHz"]), float(freq["internal_unc_MHz"]))
-        dens.plot(x, normal_pdf(x, float(freq["weighted_mean_MHz"]), sigma), color="#313131", linestyle="--", label="frequentist")
+
+        if len(group_values) >= 2:
+            dens.hist(
+                group_values,
+                bins=min(8, max(3, len(group_values))),
+                density=True,
+                alpha=0.18,
+                color="#1f9d45",
+                label="independent runs",
+            )
+        dens.plot(
+            x,
+            normal_pdf(x, float(freq["weighted_mean_MHz"]), run_scatter),
+            color="#313131",
+            linestyle="--",
+            label="freq run scatter",
+        )
         if bayes and bayes.get("available"):
-            dens.plot(bayes["mu_grid_MHz"], bayes["mu_density"], color="#7b2cbf", label="Bayesian posterior")
-        if included:
-            dens.hist([row["shift_MHz"] for row in included], bins=min(8, max(3, len(included))), density=True, alpha=0.18, color="#1f9d45")
-    dens.set_title("Shared-shift density")
+            dens.plot(
+                x,
+                normal_pdf(x, float(bayes["mu_mean_MHz"]), pred_sigma),
+                color="#7b2cbf",
+                label="Bayes posterior predictive",
+            )
+            mu = float(bayes["mu_mean_MHz"])
+            sd = float(bayes["mu_sd_MHz"])
+            dens.axvspan(mu - sd, mu + sd, color="#7b2cbf", alpha=0.18)
+            dens.axvline(mu, color="#7b2cbf", linewidth=1.2, label="shared shift +/- sd")
+    dens.set_title("Run distribution vs shared shift")
     dens.set_xlabel("Isotope shift (MHz)")
     dens.set_ylabel("Density")
-    dens.legend(loc="best", fontsize=9)
+    dens.legend(loc="best", fontsize=8)
     dens.grid(True, alpha=0.25)
 
-    subtitle = f"{len(included)} included, {len(excluded)} excluded"
+    n_rows = result.get("n_included_rows", len(included))
+    n_runs = result.get("n_independent_runs", len(groups))
+    subtitle = f"{n_rows} rows -> {n_runs} runs, {len(excluded)} excluded"
     fig.suptitle(f"{comparison} frequentist and Bayesian uncertainty analysis ({subtitle})", fontsize=14, fontweight="bold")
     fig.tight_layout()
     fig.savefig(path, dpi=200, bbox_inches="tight")

@@ -509,8 +509,14 @@ def _rest_frequencies_for_label(dat: np.ndarray, label: str, options: dict[str, 
     )
 
 
-def _fit_absolute_center(dat: np.ndarray, label: str, options: dict[str, Any]) -> dict[str, Any]:
+def _fit_absolute_center(
+    dat: np.ndarray,
+    label: str,
+    options: dict[str, Any],
+    voltage_offset_V: float | None = None,
+) -> dict[str, Any]:
     nu_ref = float(np.median(_rest_frequencies_for_label(dat, label, options)))
+    offset = options.get("voltage_offset_V", 0.0) if voltage_offset_V is None else voltage_offset_V
     center, dcenter, x, counts, centers, fit_params, x_fit_window, quality = two_fit._fit_center_from_voltage(
         dat,
         SULFUR_MASSES_U[label],
@@ -525,7 +531,7 @@ def _fit_absolute_center(dat: np.ndarray, label: str, options: dict[str, Any]) -
         voltage_col=options.get("voltage_col", "voltage"),
         voltage_multiplier=options.get("voltage_multiplier", two_fit.B_HVD2),
         use_voltage_column=options.get("use_voltage_column", True),
-        voltage_offset_V=options.get("voltage_offset_V", 0.0),
+        voltage_offset_V=offset,
         use_hene_calibration=options.get("use_hene_calibration", False),
         hene_col=options.get("hene_col", "wavemeter_wn4"),
         hene_reference_wn=options.get("hene_reference_wn"),
@@ -1005,6 +1011,29 @@ def run_bracketed_block_analyses(
         fit_unc = float(np.sqrt(result_comparison["center_fit_unc_GHz"] ** 2 + reference_unc ** 2))
         nu0 = 0.5 * (reference_center + result_comparison["center_abs_GHz"])
 
+        # Beam-voltage (HV) uncertainty on the bracketed shift. Perturb the common
+        # voltage offset by +/- the HV uncertainty and re-fit all three centers, then
+        # take half the change in the interpolated shift. Differencing the shift (not
+        # adding per-center uncertainties in quadrature) keeps the HV term correlated
+        # between the isotopes, matching the standard two-isotope path. No-op when
+        # beam_voltage_unc_V == 0.
+        beam_voltage_unc_V = float(options.get("beam_voltage_unc_V", 0.0) or 0.0)
+        voltage_unc = 0.0
+        if beam_voltage_unc_V > 0:
+            base_offset = float(options.get("voltage_offset_V", 0.0))
+
+            def _bracket_shift_at(offset: float) -> float:
+                rb = _fit_absolute_center(dat_before, "32S", options, voltage_offset_V=offset)
+                rc = _fit_absolute_center(dat_comparison, label, options, voltage_offset_V=offset)
+                ra = _fit_absolute_center(dat_after, "32S", options, voltage_offset_V=offset)
+                ref = (1.0 - fraction) * rb["center_abs_GHz"] + fraction * ra["center_abs_GHz"]
+                return rc["center_abs_GHz"] - ref
+
+            shift_plus = _bracket_shift_at(base_offset + beam_voltage_unc_V)
+            shift_minus = _bracket_shift_at(base_offset - beam_voltage_unc_V)
+            voltage_unc = abs(shift_plus - shift_minus) / 2.0
+        total_unc = float(np.sqrt(fit_unc ** 2 + voltage_unc ** 2))
+
         _plot_bracketed_fit(
             result_before,
             result_comparison,
@@ -1040,9 +1069,9 @@ def run_bracketed_block_analyses(
             comparison=f"{label}-32S",
             nu0_MHz=nu0 * GHZ_TO_MHZ,
             isotope_shift_MHz=isotope_shift * GHZ_TO_MHZ,
-            isotope_shift_total_unc_MHz=fit_unc * GHZ_TO_MHZ,
+            isotope_shift_total_unc_MHz=total_unc * GHZ_TO_MHZ,
             isotope_shift_fit_unc_MHz=fit_unc * GHZ_TO_MHZ,
-            isotope_shift_voltage_unc_MHz=0.0,
+            isotope_shift_voltage_unc_MHz=voltage_unc * GHZ_TO_MHZ,
             center_reference_MHz=(reference_center - nu0) * GHZ_TO_MHZ,
             center_reference_total_unc_MHz=reference_unc * GHZ_TO_MHZ,
             center_comparison_MHz=(result_comparison["center_abs_GHz"] - nu0) * GHZ_TO_MHZ,
