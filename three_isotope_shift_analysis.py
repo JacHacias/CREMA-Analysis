@@ -1,10 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import satlas2
 from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import curve_fit
 from scipy.special import wofz
 
 from plot_style import apply_publication_style, style_axes
+
+try:
+    import satlas2
+except ModuleNotFoundError:
+    satlas2 = None
 
 
 C = 299792458.0
@@ -13,6 +18,7 @@ AMU = 1.66053906660e-27
 ELECTRON_MASS_U = 5.48579909065e-4
 B_HVD2 = 5962.49
 SODIUM_MASS_U = 22.9897692820
+DEFAULT_HENE_WAVELENGTH_NM = 632.992
 
 
 def voigt(x, amplitude, center, sigma_g, gamma_l, background):
@@ -49,25 +55,26 @@ def _fallback_center_uncertainty(x_fit, y_fit, sigma_g, gamma_l, background):
     return max(fwhm / (2.355 * np.sqrt(n_eff)), 0.5 * dx)
 
 
-class VoigtModel(satlas2.Model):
-    def __init__(self, amplitude, center, sigma_g, gamma_l, background, name="Voigt", prefunc=None):
-        super().__init__(name, prefunc=prefunc)
-        self.params = {
-            "amplitude": satlas2.Parameter(value=amplitude, min=0.0, max=np.inf, vary=True),
-            "center": satlas2.Parameter(value=center, vary=True),
-            "sigma_g": satlas2.Parameter(value=sigma_g, min=1e-12, max=np.inf, vary=True),
-            "gamma_l": satlas2.Parameter(value=gamma_l, min=1e-12, max=np.inf, vary=True),
-            "background": satlas2.Parameter(value=background, vary=True),
-        }
+if satlas2 is not None:
+    class VoigtModel(satlas2.Model):
+        def __init__(self, amplitude, center, sigma_g, gamma_l, background, name="Voigt", prefunc=None):
+            super().__init__(name, prefunc=prefunc)
+            self.params = {
+                "amplitude": satlas2.Parameter(value=amplitude, min=0.0, max=np.inf, vary=True),
+                "center": satlas2.Parameter(value=center, vary=True),
+                "sigma_g": satlas2.Parameter(value=sigma_g, min=1e-12, max=np.inf, vary=True),
+                "gamma_l": satlas2.Parameter(value=gamma_l, min=1e-12, max=np.inf, vary=True),
+                "background": satlas2.Parameter(value=background, vary=True),
+            }
 
-    def f(self, x):
-        x = self.transform(x)
-        amplitude = self.params["amplitude"].value
-        center = self.params["center"].value
-        sigma_g = self.params["sigma_g"].value
-        gamma_l = self.params["gamma_l"].value
-        background = self.params["background"].value
-        return voigt(x, amplitude, center, sigma_g, gamma_l, background)
+        def f(self, x):
+            x = self.transform(x)
+            amplitude = self.params["amplitude"].value
+            center = self.params["center"].value
+            sigma_g = self.params["sigma_g"].value
+            gamma_l = self.params["gamma_l"].value
+            background = self.params["background"].value
+            return voigt(x, amplitude, center, sigma_g, gamma_l, background)
 
 
 def _sulfur_velocity_after_sodium_collision(
@@ -241,6 +248,65 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
     width_max = max((x_fit.max() - x_fit.min()) / 3.0, 1e-2)
 
     def _run_fit(fix_gamma=False, fix_background=False):
+        if satlas2 is None:
+            lower = [0.0, x_fit.min(), max(dx / 2.0, 1e-3), max(dx / 2.0, 1e-3), 0.0]
+            upper = [np.inf, x_fit.max(), width_max, width_max, max(np.max(y_fit), 1.0)]
+            p0 = [A_guess, x0_guess, sigma_guess, gamma_guess, y0_guess]
+            p0 = [
+                min(max(value, low), high) if np.isfinite(high) else max(value, low)
+                for value, low, high in zip(p0, lower, upper)
+            ]
+
+            if fix_gamma and fix_background:
+                def model(x, amplitude, center, sigma_g):
+                    return voigt(x, amplitude, center, sigma_g, gamma_guess, y0_guess)
+
+                popt_small, pcov = curve_fit(
+                    model,
+                    x_fit,
+                    y_fit,
+                    p0=[p0[0], p0[1], p0[2]],
+                    sigma=yerr,
+                    absolute_sigma=True,
+                    bounds=([lower[0], lower[1], lower[2]], [upper[0], upper[1], upper[2]]),
+                    maxfev=20000,
+                )
+                popt = np.array([popt_small[0], popt_small[1], popt_small[2], gamma_guess, y0_guess], dtype=float)
+                perr_small = np.sqrt(np.diag(pcov))
+                perr = np.array([perr_small[0], perr_small[1], perr_small[2], 0.0, 0.0], dtype=float)
+                return popt, perr
+
+            if fix_gamma:
+                def model(x, amplitude, center, sigma_g, background):
+                    return voigt(x, amplitude, center, sigma_g, gamma_guess, background)
+
+                popt_small, pcov = curve_fit(
+                    model,
+                    x_fit,
+                    y_fit,
+                    p0=[p0[0], p0[1], p0[2], p0[4]],
+                    sigma=yerr,
+                    absolute_sigma=True,
+                    bounds=([lower[0], lower[1], lower[2], lower[4]], [upper[0], upper[1], upper[2], upper[4]]),
+                    maxfev=20000,
+                )
+                popt = np.array([popt_small[0], popt_small[1], popt_small[2], gamma_guess, popt_small[3]], dtype=float)
+                perr_small = np.sqrt(np.diag(pcov))
+                perr = np.array([perr_small[0], perr_small[1], perr_small[2], 0.0, perr_small[3]], dtype=float)
+                return popt, perr
+
+            popt, pcov = curve_fit(
+                voigt,
+                x_fit,
+                y_fit,
+                p0=p0,
+                sigma=yerr,
+                absolute_sigma=True,
+                bounds=(lower, upper),
+                maxfev=20000,
+            )
+            return popt, np.sqrt(np.diag(pcov))
+
         model = VoigtModel(A_guess, x0_guess, sigma_guess, gamma_guess, y0_guess)
         model.params["center"].min = x_fit.min()
         model.params["center"].max = x_fit.max()
@@ -309,6 +375,93 @@ def wn_to_lab_ghz(wn_cm, frequency_multiplier=2.0):
     return np.asarray(wn_cm, dtype=float) * float(frequency_multiplier) * C * 100.0 * 1e-9
 
 
+def air_refractive_index_peck_reeder(wavelength_air_nm):
+    """Index of standard air for visible wavelengths using Peck-Reeder."""
+    wavelength_air_um = np.asarray(wavelength_air_nm, dtype=float) * 1e-3
+    sigma2 = (1.0 / wavelength_air_um) ** 2
+    n_minus_1 = 1e-8 * (
+        8060.51
+        + 2480990.0 / (132.274 - sigma2)
+        + 17455.7 / (39.32957 - sigma2)
+    )
+    return 1.0 + n_minus_1
+
+
+def vacuum_to_air_wavelength_nm(wavelength_vacuum_nm, iterations=6):
+    """Convert a vacuum wavelength to the corresponding standard-air wavelength."""
+    wavelength_air = np.asarray(wavelength_vacuum_nm, dtype=float)
+    for _ in range(iterations):
+        wavelength_air = np.asarray(wavelength_vacuum_nm, dtype=float) / air_refractive_index_peck_reeder(wavelength_air)
+    return wavelength_air
+
+
+def hene_reference_wavenumber_cm(
+    hene_reference_wavelength_nm=DEFAULT_HENE_WAVELENGTH_NM,
+    hene_reference_wavelength_medium="vacuum",
+    hene_wavenumber_medium="vacuum",
+):
+    """
+    Build the HeNe reference wavenumber in the same convention as wavemeter_wn4.
+
+    The 632.992 nm HeNe wavelength is converted to its standard-air wavelength
+    internally. The sulfur data files here report wavemeter_wn4 near 15798 cm^-1,
+    so the default comparison medium is the vacuum-equivalent wavenumber.
+    """
+    wavelength_nm = float(hene_reference_wavelength_nm)
+    wavelength_medium = str(hene_reference_wavelength_medium).lower()
+    if wavelength_medium == "vacuum":
+        wavelength_vacuum_nm = wavelength_nm
+        wavelength_air_nm = float(vacuum_to_air_wavelength_nm(wavelength_vacuum_nm))
+    elif wavelength_medium == "air":
+        wavelength_air_nm = wavelength_nm
+        wavelength_vacuum_nm = wavelength_air_nm * float(air_refractive_index_peck_reeder(wavelength_air_nm))
+    else:
+        raise ValueError("hene_reference_wavelength_medium must be 'vacuum' or 'air'.")
+
+    wavenumber_medium = str(hene_wavenumber_medium).lower()
+    if wavenumber_medium == "vacuum":
+        return 1e7 / wavelength_vacuum_nm
+    if wavenumber_medium == "air":
+        return 1e7 / wavelength_air_nm
+    raise ValueError("hene_wavenumber_medium must be 'vacuum' or 'air'.")
+
+
+def hene_correct_wavenumber(
+    dat,
+    wn_col,
+    hene_col="wavemeter_wn4",
+    hene_reference_wn=None,
+    hene_reference_wavelength_nm=DEFAULT_HENE_WAVELENGTH_NM,
+    hene_reference_wavelength_medium="vacuum",
+    hene_wavenumber_medium="vacuum",
+):
+    wn_cm = np.array(dat[wn_col], dtype=float)
+    if (
+        hene_col is None
+        or getattr(dat, "dtype", None) is None
+        or dat.dtype.names is None
+        or hene_col not in dat.dtype.names
+    ):
+        return wn_cm
+
+    hene_wn = np.array(dat[hene_col], dtype=float)
+    finite = np.isfinite(hene_wn)
+    if not np.any(finite):
+        return wn_cm
+
+    if hene_reference_wn is not None:
+        reference = float(hene_reference_wn)
+    elif hene_reference_wavelength_nm is not None:
+        reference = hene_reference_wavenumber_cm(
+            hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+            hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+            hene_wavenumber_medium=hene_wavenumber_medium,
+        )
+    else:
+        reference = float(np.nanmedian(hene_wn[finite]))
+    return wn_cm - (hene_wn - reference)
+
+
 def _lab_frequency_and_voltage(
     dat,
     wn_col,
@@ -318,8 +471,25 @@ def _lab_frequency_and_voltage(
     voltage_multiplier=B_HVD2,
     use_voltage_column=True,
     voltage_offset_V=0.0,
+    use_hene_calibration=False,
+    hene_col="wavemeter_wn4",
+    hene_reference_wn=None,
+    hene_reference_wavelength_nm=DEFAULT_HENE_WAVELENGTH_NM,
+    hene_reference_wavelength_medium="vacuum",
+    hene_wavenumber_medium="vacuum",
 ):
-    wn_cm = np.array(dat[wn_col], dtype=float)
+    if use_hene_calibration:
+        wn_cm = hene_correct_wavenumber(
+            dat,
+            wn_col,
+            hene_col=hene_col,
+            hene_reference_wn=hene_reference_wn,
+            hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+            hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+            hene_wavenumber_medium=hene_wavenumber_medium,
+        )
+    else:
+        wn_cm = np.array(dat[wn_col], dtype=float)
     has_voltage = (
         use_voltage_column
         and getattr(dat, "dtype", None) is not None
@@ -484,6 +654,29 @@ def _estimate_peak_snr(fit_params):
     return amplitude / noise
 
 
+def fit_quality_metrics(centers, counts, fit_params, x_fit_window):
+    centers = np.asarray(centers, dtype=float)
+    counts = np.asarray(counts, dtype=float)
+    model_counts = voigt(centers, *fit_params)
+    yerr = np.sqrt(np.clip(counts, 1.0, None))
+    x_fit_window = np.asarray(x_fit_window, dtype=float)
+    if x_fit_window.size:
+        in_fit = (centers >= np.min(x_fit_window)) & (centers <= np.max(x_fit_window))
+    else:
+        in_fit = np.ones_like(centers, dtype=bool)
+    dof = max(int(np.sum(in_fit)) - len(fit_params), 1)
+    reduced_chi2 = float(np.sum(((counts[in_fit] - model_counts[in_fit]) / yerr[in_fit]) ** 2) / dof)
+    peak_index = int(np.argmax(counts)) if counts.size else 0
+    peak_model = float(max(model_counts[peak_index], 1e-12)) if counts.size else np.nan
+    return {
+        "peak_to_model_max": float(counts[peak_index] / peak_model) if counts.size else np.nan,
+        "reduced_chi2": reduced_chi2,
+        "max_bin_center_MHz": float(centers[peak_index] * 1000.0) if counts.size else np.nan,
+        "fit_window_min_MHz": float(np.min(x_fit_window) * 1000.0) if x_fit_window.size else np.nan,
+        "fit_window_max_MHz": float(np.max(x_fit_window) * 1000.0) if x_fit_window.size else np.nan,
+    }
+
+
 def _fit_center_from_voltage(
     dat,
     mass_u,
@@ -499,6 +692,12 @@ def _fit_center_from_voltage(
     voltage_multiplier=B_HVD2,
     use_voltage_column=True,
     voltage_offset_V=0.0,
+    use_hene_calibration=False,
+    hene_col="wavemeter_wn4",
+    hene_reference_wn=None,
+    hene_reference_wavelength_nm=DEFAULT_HENE_WAVELENGTH_NM,
+    hene_reference_wavelength_medium="vacuum",
+    hene_wavenumber_medium="vacuum",
     neutralization="none",
     sodium_mass_u=SODIUM_MASS_U,
     sodium_collision_branch="forward",
@@ -512,6 +711,12 @@ def _fit_center_from_voltage(
         voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
         voltage_offset_V=voltage_offset_V,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col,
+        hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
     )
     nu = doppler_correct_ghz(
         nu_lab,
@@ -538,6 +743,7 @@ def _fit_center_from_voltage(
         "centers": centers,
         "fit_params": p,
         "x_fit_window": x_fit,
+        "fit_quality": fit_quality_metrics(centers, counts, p, x_fit),
     }
 
 
@@ -560,7 +766,14 @@ def plot_three_isotopes_fit(
     beam_voltage_unc_V=0.0,
     voltage_col="voltage",
     voltage_multiplier=B_HVD2,
+    voltage_offset_V=0.0,
     use_voltage_column=True,
+    use_hene_calibration=False,
+    hene_col="wavemeter_wn4",
+    hene_reference_wn=None,
+    hene_reference_wavelength_nm=DEFAULT_HENE_WAVELENGTH_NM,
+    hene_reference_wavelength_medium="vacuum",
+    hene_wavenumber_medium="vacuum",
     charge_e=1,
     geometry="collinear",
     neutralization="none",
@@ -584,7 +797,14 @@ def plot_three_isotopes_fit(
         beam_voltage_V=beam_voltage_V,
         voltage_col=voltage_col,
         voltage_multiplier=voltage_multiplier,
+        voltage_offset_V=voltage_offset_V,
         use_voltage_column=use_voltage_column,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col,
+        hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
     )
     nu34_lab, voltage34_V, voltage34_source = _lab_frequency_and_voltage(
         cut_file_34S,
@@ -593,7 +813,14 @@ def plot_three_isotopes_fit(
         beam_voltage_V=beam_voltage_V,
         voltage_col=voltage_col,
         voltage_multiplier=voltage_multiplier,
+        voltage_offset_V=voltage_offset_V,
         use_voltage_column=use_voltage_column,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col,
+        hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
     )
     nu36_lab, voltage36_V, voltage36_source = _lab_frequency_and_voltage(
         cut_file_36S,
@@ -602,7 +829,14 @@ def plot_three_isotopes_fit(
         beam_voltage_V=beam_voltage_V,
         voltage_col=voltage_col,
         voltage_multiplier=voltage_multiplier,
+        voltage_offset_V=voltage_offset_V,
         use_voltage_column=use_voltage_column,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col,
+        hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
     )
 
     nu32 = doppler_correct_ghz(
@@ -628,6 +862,12 @@ def plot_three_isotopes_fit(
         bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier,
         voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
+        voltage_offset_V=voltage_offset_V,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col, hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
         sodium_collision_branch=sodium_collision_branch,
     )
@@ -636,6 +876,12 @@ def plot_three_isotopes_fit(
         bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier,
         voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
+        voltage_offset_V=voltage_offset_V,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col, hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
         sodium_collision_branch=sodium_collision_branch,
     )
@@ -644,6 +890,12 @@ def plot_three_isotopes_fit(
         bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier,
         voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
         use_voltage_column=use_voltage_column,
+        voltage_offset_V=voltage_offset_V,
+        use_hene_calibration=use_hene_calibration,
+        hene_col=hene_col, hene_reference_wn=hene_reference_wn,
+        hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+        hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+        hene_wavenumber_medium=hene_wavenumber_medium,
         neutralization=neutralization, sodium_mass_u=sodium_mass_u,
         sodium_collision_branch=sodium_collision_branch,
     )
@@ -661,7 +913,12 @@ def plot_three_isotopes_fit(
                 dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
                 bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier,
                 voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
-                use_voltage_column=use_voltage_column, voltage_offset_V=beam_voltage_unc_V,
+                use_voltage_column=use_voltage_column, voltage_offset_V=voltage_offset_V + beam_voltage_unc_V,
+                use_hene_calibration=use_hene_calibration,
+                hene_col=hene_col, hene_reference_wn=hene_reference_wn,
+                hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+                hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+                hene_wavenumber_medium=hene_wavenumber_medium,
                 neutralization=neutralization, sodium_mass_u=sodium_mass_u,
                 sodium_collision_branch=sodium_collision_branch,
             )["center"]
@@ -669,7 +926,12 @@ def plot_three_isotopes_fit(
                 dat, mass_u, beam_voltage_V, wn_col, bins, charge_e, geometry, nu0,
                 bin_width_MHz=bin_width_MHz, frequency_multiplier=frequency_multiplier,
                 voltage_col=voltage_col, voltage_multiplier=voltage_multiplier,
-                use_voltage_column=use_voltage_column, voltage_offset_V=-beam_voltage_unc_V,
+                use_voltage_column=use_voltage_column, voltage_offset_V=voltage_offset_V - beam_voltage_unc_V,
+                use_hene_calibration=use_hene_calibration,
+                hene_col=hene_col, hene_reference_wn=hene_reference_wn,
+                hene_reference_wavelength_nm=hene_reference_wavelength_nm,
+                hene_reference_wavelength_medium=hene_reference_wavelength_medium,
+                hene_wavenumber_medium=hene_wavenumber_medium,
                 neutralization=neutralization, sodium_mass_u=sodium_mass_u,
                 sodium_collision_branch=sodium_collision_branch,
             )["center"]
@@ -691,6 +953,8 @@ def plot_three_isotopes_fit(
     shift_36_32_total_unc = np.sqrt(shift_36_32_fit_unc**2 + shift_36_32_voltage_unc**2)
 
     fig, axes = plt.subplots(3, 1, figsize=(14, 13), sharex=True)
+    display_scale = 1000.0
+    display_unit = "MHz"
     plot_info = [
         (axes[0], res32, "32S", "C0"),
         (axes[1], res34, "34S", "C1"),
@@ -709,7 +973,7 @@ def plot_three_isotopes_fit(
         yfit = voigt(xfit, *res["fit_params"])
 
         ax.errorbar(
-            res["centers"],
+            res["centers"] * display_scale,
             res["counts"],
             yerr=_poisson_yerr(res["counts"]),
             fmt="o",
@@ -721,12 +985,12 @@ def plot_three_isotopes_fit(
             capthick=1.0,
             label=label,
         )
-        ax.plot(xfit, yfit, color=color, lw=2)
+        ax.plot(xfit * display_scale, yfit, color=color, lw=2)
         ax.axvline(
-            res["center"],
+            res["center"] * display_scale,
             color=color,
             linestyle="--",
-            label=f"center = {res['center']:.3f} +/- {res['center_total_unc']:.3f} GHz",
+            label=f"center = {res['center'] * display_scale:.1f} +/- {res['center_total_unc'] * display_scale:.1f} {display_unit}",
         )
         ax.axvline(0.0, color="k", linestyle=":", label=r"$\nu_0$")
         ax.set_ylabel("Counts", fontweight="bold")
@@ -734,28 +998,28 @@ def plot_three_isotopes_fit(
         style_axes(ax)
         ax.legend()
 
-    axes[-1].set_xlabel(r"Corrected frequency relative to $\nu_0$ (GHz)", fontweight="bold")
-    axes[-1].set_xlim(x_left, x_right)
+    axes[-1].set_xlabel(r"Corrected frequency relative to $\nu_0$ (MHz)", fontweight="bold")
+    axes[-1].set_xlim(x_left * display_scale, x_right * display_scale)
     fig.suptitle("Doppler-Corrected Sulfur Isotope Comparison", fontweight="bold", fontsize="x-large")
     plt.tight_layout()
     plt.show()
 
-    print(f"32S center: {res32['center']:.6f} +/- {res32['center_total_unc']:.6f} GHz")
+    print(f"32S center: {res32['center'] * display_scale:.3f} +/- {res32['center_total_unc'] * display_scale:.3f} MHz")
     print(f"  estimated peak SNR: {_estimate_peak_snr(res32['fit_params']):.2f}")
-    print(f"34S center: {res34['center']:.6f} +/- {res34['center_total_unc']:.6f} GHz")
+    print(f"34S center: {res34['center'] * display_scale:.3f} +/- {res34['center_total_unc'] * display_scale:.3f} MHz")
     print(f"  estimated peak SNR: {_estimate_peak_snr(res34['fit_params']):.2f}")
-    print(f"36S center: {res36['center']:.6f} +/- {res36['center_total_unc']:.6f} GHz")
+    print(f"36S center: {res36['center'] * display_scale:.3f} +/- {res36['center_total_unc'] * display_scale:.3f} MHz")
     print(f"  estimated peak SNR: {_estimate_peak_snr(res36['fit_params']):.2f}")
     print()
-    print(f"Isotope shift (34S - 32S): {shift_34_32:.6f} +/- {shift_34_32_total_unc:.6f} GHz")
-    print(f"  fit contribution: {shift_34_32_fit_unc:.6f} GHz")
-    print(f"  voltage contribution: {shift_34_32_voltage_unc:.6f} GHz")
+    print(f"Isotope shift (34S - 32S): {shift_34_32 * display_scale:.3f} +/- {shift_34_32_total_unc * display_scale:.3f} MHz")
+    print(f"  fit contribution: {shift_34_32_fit_unc * display_scale:.3f} MHz")
+    print(f"  voltage contribution: {shift_34_32_voltage_unc * display_scale:.3f} MHz")
     print()
-    print(f"Isotope shift (36S - 32S): {shift_36_32:.6f} +/- {shift_36_32_total_unc:.6f} GHz")
-    print(f"  fit contribution: {shift_36_32_fit_unc:.6f} GHz")
-    print(f"  voltage contribution: {shift_36_32_voltage_unc:.6f} GHz")
+    print(f"Isotope shift (36S - 32S): {shift_36_32 * display_scale:.3f} +/- {shift_36_32_total_unc * display_scale:.3f} MHz")
+    print(f"  fit contribution: {shift_36_32_fit_unc * display_scale:.3f} MHz")
+    print(f"  voltage contribution: {shift_36_32_voltage_unc * display_scale:.3f} MHz")
     print()
-    print(f"nu0 reference: {nu0:.6f} GHz")
+    print(f"nu0 reference: {nu0 * display_scale:.3f} MHz")
     print(f"32S voltage source: {voltage32_source} (mean {float(np.mean(voltage32_V)):.3f} V)")
     print(f"34S voltage source: {voltage34_source} (mean {float(np.mean(voltage34_V)):.3f} V)")
     print(f"36S voltage source: {voltage36_source} (mean {float(np.mean(voltage36_V)):.3f} V)")
@@ -778,7 +1042,14 @@ def plot_three_isotopes_fit(
         "frequency_multiplier": float(frequency_multiplier),
         "voltage_col": voltage_col,
         "voltage_multiplier": float(voltage_multiplier),
+        "voltage_offset_V": float(voltage_offset_V),
         "use_voltage_column": bool(use_voltage_column),
+        "use_hene_calibration": bool(use_hene_calibration),
+        "hene_col": hene_col,
+        "hene_reference_wn": hene_reference_wn,
+        "hene_reference_wavelength_nm": hene_reference_wavelength_nm,
+        "hene_reference_wavelength_medium": hene_reference_wavelength_medium,
+        "hene_wavenumber_medium": hene_wavenumber_medium,
         "voltage32_source": voltage32_source,
         "voltage34_source": voltage34_source,
         "voltage36_source": voltage36_source,

@@ -428,6 +428,7 @@ def plot_isotope_shift_stability(
     title="Sulfur Isotope Shift Stability",
     components=("fit", "voltage", "wavemeter", "total"),
     show_uncertainty_panel=True,
+    show_average_sem=False,
 ):
     """
     Plot 34S-32S isotope shifts by day in MHz with uncertainty breakdowns.
@@ -450,6 +451,9 @@ def plot_isotope_shift_stability(
         "fit", "voltage", "wavemeter", and "total".
     show_uncertainty_panel : bool, optional
         If True, include the lower panel showing uncertainty magnitudes.
+    show_average_sem : bool, optional
+        If True, draw the arithmetic mean isotope shift and SEM on the
+        shift panel.
 
     Returns
     -------
@@ -578,6 +582,24 @@ def plot_isotope_shift_stability(
             label="Wavemeter contribution",
             **component_style,
         )
+    if show_average_sem:
+        average_shift = float(np.mean(shift))
+        sem_shift = float(np.std(shift, ddof=1) / np.sqrt(shift.size)) if shift.size > 1 else 0.0
+        axes[0].axhline(
+            average_shift,
+            color="0.25",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"Average = {average_shift:.3f} +/- {sem_shift:.3f} MHz",
+        )
+        if sem_shift > 0:
+            axes[0].axhspan(
+                average_shift - sem_shift,
+                average_shift + sem_shift,
+                color="0.25",
+                alpha=0.12,
+                label="SEM",
+            )
     axes[0].set_ylabel("Shift (MHz)", fontweight="bold")
     axes[0].set_title(title, fontweight="bold")
     axes[0].legend(loc="best")
