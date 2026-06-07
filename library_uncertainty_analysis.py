@@ -347,8 +347,8 @@ def plot_uncertainty_analysis(result: dict[str, Any], path: str | Path) -> None:
     included = result.get("included", [])
     excluded = result.get("excluded", [])
     comparison = result.get("comparison", "")
-    fig, axes = plt.subplots(1, 2, figsize=(13.5, 5.2), gridspec_kw={"width_ratios": [1.45, 1.0]})
-    ax, dens = axes
+    fig, axes = plt.subplots(1, 3, figsize=(18.0, 5.2), gridspec_kw={"width_ratios": [1.5, 1.0, 0.85]})
+    ax, dens, pull_ax = axes
 
     all_values = [
         row["shift_MHz"]
@@ -446,11 +446,63 @@ def plot_uncertainty_analysis(result: dict[str, Any], path: str | Path) -> None:
         )
         dens.axvline(mean, color="#c0392b", linestyle="--", linewidth=1.0)
         dens.set_xlim(mean - pad, mean + pad)
+
+        # Scatter-health annotation: chi2_red ~ 1 and small tau mean the run-to-run
+        # scatter is consistent with the quoted per-run uncertainties.
+        chi2_red = float(freq.get("chi2_red", float("nan")))
+        note = f"chi2_red = {chi2_red:.2f}"
+        if bayes_ok:
+            note += f"\nextra scatter tau = {float(bayes['sigma_extra_mean_MHz']):.1f} MHz"
+        dens.text(
+            0.03,
+            0.97,
+            note,
+            transform=dens.transAxes,
+            va="top",
+            ha="left",
+            fontsize=9,
+            bbox=dict(boxstyle="round", facecolor="#ffffff", edgecolor="#cccccc", alpha=0.85),
+        )
     dens.set_title("Frequentist propagation vs Bayesian posterior")
     dens.set_xlabel(f"Shared isotope shift {comparison} (MHz)")
     dens.set_ylabel("Density")
     dens.legend(loc="best", fontsize=9)
     dens.grid(True, alpha=0.25)
+
+    # Third panel: per-run pulls (residual / uncertainty). For trustworthy error bars
+    # the pulls scatter within +/-1 with RMS ~ 1; outliers or an RMS well above 1 flag
+    # underestimated uncertainties.
+    if groups and freq:
+        mean = float(freq["weighted_mean_MHz"])
+        pulls = np.asarray(
+            [(g["value_MHz"] - mean) / g["sigma_MHz"] for g in groups if g["sigma_MHz"] > 0],
+            dtype=float,
+        )
+        idx = np.arange(pulls.size)
+        pull_ax.axhspan(-1.0, 1.0, color="#1f9d45", alpha=0.12)
+        pull_ax.axhline(0.0, color="#313131", linewidth=1.0)
+        for level in (-2.0, 2.0):
+            pull_ax.axhline(level, color="#999999", linestyle=":", linewidth=1.0)
+        pull_ax.plot(idx, pulls, "o", color="#1f9d45", markersize=7)
+        if pulls.size:
+            rms = float(math.sqrt(np.mean(np.square(pulls))))
+            pull_ax.text(
+                0.5,
+                0.98,
+                f"pull RMS = {rms:.2f} (ideal ~1)",
+                transform=pull_ax.transAxes,
+                va="top",
+                ha="center",
+                fontsize=9,
+                bbox=dict(boxstyle="round", facecolor="#ffffff", edgecolor="#cccccc", alpha=0.85),
+            )
+        limit = max(2.6, float(np.max(np.abs(pulls))) * 1.15) if pulls.size else 2.6
+        pull_ax.set_ylim(-limit, limit)
+        pull_ax.set_xticks(idx)
+        pull_ax.set_xlabel("independent run index")
+    pull_ax.set_title("Per-run pulls")
+    pull_ax.set_ylabel("normalized residual (pull)")
+    pull_ax.grid(True, axis="y", alpha=0.25)
 
     n_rows = result.get("n_included_rows", len(included))
     n_runs = result.get("n_independent_runs", len(groups))
