@@ -7,3 +7,4 @@ analysis_plots/
 *.log
 exports/
 uncertainty_plots/
+energy_plots/

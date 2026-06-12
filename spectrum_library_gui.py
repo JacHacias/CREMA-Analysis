@@ -32,11 +32,15 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 
+import isotope_shift_analysis as isa
 from quick_isotope_shift import (
     DEFAULT_ANALYSIS_OPTIONS,
     FIT_BACKEND,
     LIBRARY_COLUMNS,
+    SULFUR_MASSES_U,
+    _prepare_cut_file_for_label,
     append_library_jsonl,
     append_new_library_rows_csv,
     infer_isotope_label,
@@ -62,6 +66,7 @@ LIBRARY_JSONL = ROOT / "data_library" / "isotope_shift_library.jsonl"
 PLOT_DIR = ROOT / "analysis_plots"
 SUMMARY_PLOT_DIR = ROOT / "analysis_plots" / "library_summary"
 UNCERTAINTY_PLOT_DIR = ROOT / "uncertainty_plots"
+ENERGY_PLOT_DIR = ROOT / "energy_plots"
 EXPORTS_DIR = ROOT / "exports"
 CONFIG_PATH = ROOT / "analysis_defaults.json"
 MIN_LIBRARY_POINTS_PER_ISOTOPE = 100
@@ -257,6 +262,227 @@ def build_export_csv(comparison: str, result: dict) -> str:
             out["comparison"] = comparison
         writer.writerow(out)
     return buf.getvalue()
+
+
+def _fit_lab_centroid(paths: list[Path], label: str, options: dict) -> dict:
+    """Fit the resonance centroid of one scan in the LAB frame (no voltage/Doppler
+    assumption), reusing the standard cleaning, gating, calibration, and Voigt fit."""
+    if not paths:
+        raise ValueError("No files provided for one of the geometries.")
+    per_gates = options.get("per_isotope_tof_gates") or {}
+    dat, _summary = _prepare_cut_file_for_label(
+        label, list(paths), options=options, per_isotope_tof_gates=per_gates
+    )
+    nu_lab, voltage_V, _src = isa._lab_frequency_and_voltage(
+        dat,
+        options.get("wn_col", "wavemeter_wn1"),
+        frequency_multiplier=options.get("frequency_multiplier", 2.0),
+        beam_voltage_V=options.get("beam_voltage_V", 10000.0),
+        voltage_col=options.get("voltage_col", "voltage"),
+        voltage_multiplier=options.get("voltage_multiplier", isa.B_HVD2),
+        use_voltage_column=options.get("use_voltage_column", True),
+        voltage_offset_V=options.get("voltage_offset_V", 0.0),
+        use_hene_calibration=options.get("use_hene_calibration", False),
+        hene_col=options.get("hene_col", "wavemeter_wn4"),
+        hene_reference_wn=options.get("hene_reference_wn"),
+        hene_reference_wavelength_nm=options.get("hene_reference_wavelength_nm", isa.DEFAULT_HENE_WAVELENGTH_NM),
+        hene_reference_wavelength_medium=options.get("hene_reference_wavelength_medium", "vacuum"),
+        hene_wavenumber_medium=options.get("hene_wavenumber_medium", "vacuum"),
+    )
+    nu_lab = np.asarray(nu_lab, dtype=float)
+    nu_lab = nu_lab[np.isfinite(nu_lab)]
+    if nu_lab.size == 0:
+        raise ValueError(f"No finite lab-frame frequencies for {label}.")
+    nu_ref = float(np.median(nu_lab))
+    x = nu_lab - nu_ref
+    hist_bins = isa._resolve_histogram_bins(x, bins=120, bin_width_MHz=options.get("bin_width_MHz"))
+    counts, edges = np.histogram(x, bins=hist_bins)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    popt, _pcov, perr, x_fit = isa.fit_histogram_peak(centers, counts)
+    return {
+        "center_GHz": nu_ref + float(popt[1]),
+        "center_unc_GHz": float(perr[1]),
+        "nu_ref_GHz": nu_ref,
+        "voltage_V_median": float(np.median(voltage_V)) if np.size(voltage_V) else float("nan"),
+        "n_points": int(nu_lab.size),
+        "centers_GHz": centers + nu_ref,
+        "counts": counts,
+        "popt": popt,
+        "x_fit_GHz": (np.asarray(x_fit, dtype=float) + nu_ref) if x_fit is not None else None,
+    }
+
+
+def _plot_energy_fits(label: str, col: dict, anti: dict, nu0_GHz: float, path: Path) -> None:
+    ENERGY_PLOT_DIR.mkdir(parents=True, exist_ok=True)
+    # Both peaks share one frequency axis (detuning from the rest frequency nu0), at
+    # their true separated positions. They are ~1 THz apart with ~1 GHz-wide peaks, so
+    # a broken axis keeps the real separation visible while staying zoomed enough to
+    # read each lineshape: lower-frequency scan on the left, higher on the right.
+    sep_GHz = col["center_GHz"] - anti["center_GHz"]
+    segments = sorted(
+        [("collinear", col, "#0b7285"), ("anti-collinear", anti, "#9a5a00")],
+        key=lambda item: item[1]["center_GHz"],
+    )
+    with PLOT_LOCK:
+        fig, (ax_lo, ax_hi) = plt.subplots(
+            1, 2, sharey=True, figsize=(12.0, 5.0), gridspec_kw={"wspace": 0.06}
+        )
+        for ax, (geom, fit, color) in zip((ax_lo, ax_hi), segments):
+            x = np.asarray(fit["centers_GHz"], dtype=float) - nu0_GHz
+            ax.step(
+                x, fit["counts"], where="mid", color=color, alpha=0.85,
+                label=f"{geom}\n{fit['center_GHz']:.4f} GHz (n={fit['n_points']})",
+            )
+            if fit["x_fit_GHz"] is not None and np.size(fit["x_fit_GHz"]):
+                xf = np.asarray(fit["x_fit_GHz"], dtype=float) - nu0_GHz
+                fine = np.linspace(float(np.min(xf)), float(np.max(xf)), 300)
+                yf = isa.voigt(fine + (nu0_GHz - fit["nu_ref_GHz"]), *fit["popt"])
+                ax.plot(fine, yf, color=color, linewidth=1.8, linestyle="--")
+            ax.set_xlim(float(np.min(x)), float(np.max(x)))
+            ax.legend(fontsize=9, loc="upper right")
+            ax.grid(True, alpha=0.25)
+        # Broken-axis cosmetics: hide the facing spines and draw diagonal break marks.
+        ax_lo.spines["right"].set_visible(False)
+        ax_hi.spines["left"].set_visible(False)
+        ax_hi.tick_params(left=False)
+        ax_lo.set_ylabel("counts")
+        d = 0.012
+        kw = dict(transform=ax_lo.transAxes, color="#333333", clip_on=False, linewidth=1.0)
+        ax_lo.plot((1 - d, 1 + d), (-d, +d), **kw)
+        ax_lo.plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
+        kw["transform"] = ax_hi.transAxes
+        ax_hi.plot((-d, +d), (-d, +d), **kw)
+        ax_hi.plot((-d, +d), (1 - d, 1 + d), **kw)
+        fig.suptitle(
+            f"{label}: collinear / anti-collinear Doppler split "
+            f"(separation {sep_GHz:.4f} GHz)",
+            fontsize=13,
+        )
+        fig.text(0.5, 0.01, "frequency - rest frequency nu0 (GHz)", ha="center")
+        fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+
+def compute_beam_energy_correction(
+    collinear_files: list[str],
+    anti_files: list[str],
+    label: str,
+    options: dict,
+    data_dir: str | Path,
+) -> dict:
+    """Collinear / anti-collinear beam-energy correction for two same-isotope scans.
+
+    nu0 = sqrt(nu_c * nu_a) is the rest frequency independent of beam energy, and the
+    ratio gives beta -> kinetic energy. (collinear factor gamma*(1-beta),
+    anti-collinear gamma*(1+beta).)
+    """
+    if label not in SULFUR_MASSES_U:
+        raise ValueError(f"Unknown isotope '{label}'. Use one of {sorted(SULFUR_MASSES_U)}.")
+    mass_u = float(SULFUR_MASSES_U[label])
+    charge = int(options.get("charge_e", 1))
+    neutralization = str(options.get("neutralization", "none"))
+
+    col = _fit_lab_centroid(_resolve_gui_files(collinear_files, data_dir), label, options)
+    anti = _fit_lab_centroid(_resolve_gui_files(anti_files, data_dir), label, options)
+    nu_c, sc = col["center_GHz"], col["center_unc_GHz"]
+    nu_a, sa = anti["center_GHz"], anti["center_unc_GHz"]
+    if nu_c <= 0 or nu_a <= 0:
+        raise ValueError("Non-positive lab centroid; check inputs.")
+
+    nu0 = math.sqrt(nu_c * nu_a)
+    nu0_unc = 0.5 * nu0 * math.sqrt((sc / nu_c) ** 2 + (sa / nu_a) ** 2)
+
+    s = nu_c + nu_a
+    beta_signed = (nu_c - nu_a) / s
+    beta_unc = math.sqrt((2.0 * nu_a / s ** 2 * sc) ** 2 + (2.0 * nu_c / s ** 2 * sa) ** 2)
+    swapped = beta_signed < 0
+    beta = abs(beta_signed)
+    if beta >= 1.0:
+        raise ValueError("Unphysical beta >= 1 from the two centroids; check the inputs/geometry.")
+    gamma = 1.0 / math.sqrt(1.0 - beta ** 2)
+    velocity = beta * isa.C
+
+    if neutralization.lower() in ("none", "ion", "charged"):
+        m_probed_u = mass_u - charge * isa.ELECTRON_MASS_U
+    else:
+        m_probed_u = mass_u
+    m_probed = m_probed_u * isa.AMU
+    ke_probed_eV = (gamma - 1.0) * m_probed * isa.C ** 2 / isa.E_CHARGE
+    dke_dbeta = m_probed * isa.C ** 2 * gamma ** 3 * beta
+    ke_probed_unc_eV = abs(dke_dbeta * beta_unc) / isa.E_CHARGE
+
+    # Infer the original ion-beam voltage by inverting the forward beta(V) model.
+    def beta_model(voltage: float) -> float:
+        return float(
+            isa.beam_beta_after_cec(
+                mass_u,
+                beam_voltage_V=voltage,
+                charge_e=charge,
+                neutralization=neutralization,
+                sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
+                sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
+            )
+        )
+
+    v_inferred = None
+    v_inferred_unc = None
+    try:
+        from scipy.optimize import brentq
+
+        v_inferred = float(brentq(lambda v: beta_model(v) - beta, 1.0, 5.0e6))
+        step = max(1.0, 1e-4 * v_inferred)
+        slope = (beta_model(v_inferred + step) - beta_model(v_inferred - step)) / (2.0 * step)
+        if slope > 0:
+            v_inferred_unc = beta_unc / slope
+    except Exception:
+        v_inferred = None
+    ke_ion_eV = charge * v_inferred if v_inferred is not None else None
+
+    v_set = float(np.nanmedian([col["voltage_V_median"], anti["voltage_V_median"]]))
+    delta_V = (v_inferred - v_set) if v_inferred is not None else None
+
+    rest_from_voltage = float(
+        isa.doppler_correct_ghz(
+            nu_c, mass_u, v_set, charge, "collinear",
+            neutralization=neutralization,
+            sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
+            sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
+        )
+    )
+
+    plot_view, plot_error = "", ""
+    try:
+        plot_path = ENERGY_PLOT_DIR / f"energy_{safe_plot_label(label)}.png"
+        _plot_energy_fits(label, col, anti, nu0, plot_path)
+        plot_view = plot_url(str(plot_path))
+    except Exception as exc:  # the numbers must survive a plotting failure
+        plot_error = str(exc)
+
+    return {
+        "isotope": label,
+        "neutralization": neutralization,
+        "collinear": {"center_GHz": nu_c, "center_unc_MHz": sc * 1000.0, "n_points": col["n_points"], "voltage_V": col["voltage_V_median"]},
+        "anticollinear": {"center_GHz": nu_a, "center_unc_MHz": sa * 1000.0, "n_points": anti["n_points"], "voltage_V": anti["voltage_V_median"]},
+        "rest_frequency_GHz": nu0,
+        "rest_frequency_unc_MHz": nu0_unc * 1000.0,
+        "beta": beta,
+        "beta_unc": beta_unc,
+        "gamma": gamma,
+        "velocity_m_s": velocity,
+        "ke_probed_eV": ke_probed_eV,
+        "ke_probed_unc_eV": ke_probed_unc_eV,
+        "ke_ion_eV": ke_ion_eV,
+        "voltage_inferred_V": v_inferred,
+        "voltage_inferred_unc_V": v_inferred_unc,
+        "voltage_set_V": v_set,
+        "delta_V": delta_V,
+        "doppler_offset_collinear_MHz": (nu0 - nu_c) * 1000.0,
+        "doppler_offset_anticollinear_MHz": (nu0 - nu_a) * 1000.0,
+        "hv_discrepancy_MHz": (nu0 - rest_from_voltage) * 1000.0,
+        "geometry_swapped": swapped,
+        "plot_url": plot_view,
+        "plot_error": plot_error,
+    }
 
 
 def row_to_view(row: dict) -> dict:
@@ -1040,6 +1266,11 @@ def render_page() -> bytes:
       color: #7a271a;
     }}
     details summary {{ cursor: pointer; font-size: 12px; margin-top: 6px; }}
+    .tabs {{ display: flex; gap: 4px; padding: 8px 28px 0; background: #eef5f7; border-bottom: 1px solid var(--line); }}
+    .tab-btn {{ background: #dce8ec; color: var(--ink); border: 1px solid var(--line); border-bottom: none; border-radius: 6px 6px 0 0; padding: 8px 16px; font-weight: 650; }}
+    .tab-btn.active {{ background: #ffffff; color: var(--accent-dark); }}
+    .tab-panel {{ display: none; }}
+    .tab-panel.active {{ display: block; }}
     @media (max-width: 900px) {{
       main {{ grid-template-columns: 1fr; }}
       .control {{ border-right: 0; border-bottom: 1px solid var(--line); }}
@@ -1053,6 +1284,11 @@ def render_page() -> bytes:
     <h1>CREMA Spectrum Library</h1>
     <p>Backend: {html.escape(FIT_BACKEND)} | Library: {html.escape(str(LIBRARY_CSV))}</p>
   </header>
+  <nav class="tabs">
+    <button type="button" class="tab-btn active" data-tab="library">Library analysis</button>
+    <button type="button" class="tab-btn" data-tab="energy">Collinear/anti-collinear beam energy correction</button>
+  </nav>
+  <div id="tab-library" class="tab-panel active">
   <main>
     <section class="control">
       <form id="analysis-form">
@@ -1205,6 +1441,54 @@ def render_page() -> bytes:
       <div id="library">{rows_table(summary['rows'])}</div>
     </section>
   </main>
+  </div>
+  <div id="tab-energy" class="tab-panel">
+  <main>
+    <section class="control">
+      <form id="energy-form">
+        <label for="energy-data-dir">Data folder</label>
+        <input id="energy-data-dir" name="data_dir" value="{html.escape(str(DEFAULT_DATA_DIR))}">
+        <div class="help">Relative filenames below are resolved from this folder.</div>
+
+        <label for="energy-isotope">Isotope</label>
+        <input id="energy-isotope" name="isotope" placeholder="32S" value="32S">
+        <div class="help">Both scans must be the same isotope (collinear and anti-collinear).</div>
+
+        <label for="collinear-files">Collinear scan file(s)</label>
+        <textarea id="collinear-files" name="collinear_files" placeholder="32S_collinear.csv"></textarea>
+
+        <label for="anticollinear-files">Anti-collinear scan file(s)</label>
+        <textarea id="anticollinear-files" name="anticollinear_files" placeholder="32S_anticollinear.csv"></textarea>
+
+        <div class="grid2">
+          <div>
+            <label for="energy-bin">Bin MHz</label>
+            <input id="energy-bin" name="bin_width_MHz" value="{default_options['bin_width_MHz']}">
+          </div>
+          <div>
+            <label for="energy-voltage">Set HV (V)</label>
+            <input id="energy-voltage" name="beam_voltage_V" placeholder="from data column">
+          </div>
+        </div>
+        <div class="help">Bin width and HV are optional overrides; the set HV defaults to the voltage column in the data.</div>
+
+        <div class="actions">
+          <button type="submit">Compute beam energy correction</button>
+        </div>
+        <div id="energy-status" class="status">Provide two same-isotope scans (collinear + anti-collinear).</div>
+      </form>
+    </section>
+    <section>
+      <div class="library-head">
+        <h2>Collinear/anti-collinear beam energy correction</h2>
+        <div class="meta">&nu;&#8320; = &radic;(&nu;_collinear &times; &nu;_anti), energy-independent</div>
+      </div>
+      <div id="energy-summary" class="summary-cards"></div>
+      <div id="energy-plot" class="plots"><p class="empty">Run the correction to see the two centroid fits.</p></div>
+      <div id="energy-detail" class="meta"></div>
+    </section>
+  </main>
+  </div>
   <script>
     const form = document.getElementById('analysis-form');
     const statusBox = document.getElementById('status');
@@ -1467,6 +1751,69 @@ def render_page() -> bytes:
         setStatus(error.message, 'err', error.detail);
       }}
     }});
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {{
+      btn.addEventListener('click', () => {{
+        const tab = btn.getAttribute('data-tab');
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+      }});
+    }});
+
+    // Beam energy correction tab
+    const energyForm = document.getElementById('energy-form');
+    const energyStatus = document.getElementById('energy-status');
+    const energySummary = document.getElementById('energy-summary');
+    const energyPlot = document.getElementById('energy-plot');
+    const energyDetail = document.getElementById('energy-detail');
+
+    function setEnergyStatus(text, kind, detail) {{
+      energyStatus.className = 'status ' + (kind || '');
+      energyStatus.textContent = text;
+      if (detail) {{
+        const det = document.createElement('details');
+        const sum = document.createElement('summary'); sum.textContent = 'Show error details';
+        const pre = document.createElement('pre'); pre.textContent = detail; pre.className = 'error-detail';
+        det.appendChild(sum); det.appendChild(pre); energyStatus.appendChild(det);
+      }}
+    }}
+
+    function eCard(value, label) {{ return `<div class="summary-card"><strong>${{value}}</strong><span>${{label}}</span></div>`; }}
+    function expo(x, dig) {{ const n = Number(x); return Number.isFinite(n) ? n.toExponential(dig || 2) : 'n/a'; }}
+
+    function renderEnergy(d) {{
+      const cards = [];
+      cards.push(eCard(`${{fmt(d.rest_frequency_GHz, 4)}} GHz`, `rest freq &nu;&#8320; +/- ${{fmt(d.rest_frequency_unc_MHz, 2)}} MHz`));
+      cards.push(eCard(expo(d.beta, 3), `beta +/- ${{expo(d.beta_unc, 1)}}`));
+      cards.push(eCard(`${{fmt(d.velocity_m_s, 0)}} m/s`, 'beam velocity'));
+      cards.push(eCard(`${{fmt(d.ke_probed_eV, 1)}} eV`, `KE probed species +/- ${{fmt(d.ke_probed_unc_eV, 1)}} eV`));
+      cards.push(eCard(d.ke_ion_eV != null ? `${{fmt(d.ke_ion_eV, 1)}} eV` : 'n/a', 'inferred ion-beam KE'));
+      cards.push(eCard(d.voltage_inferred_V != null ? `${{fmt(d.voltage_inferred_V, 1)}} V` : 'n/a', `inferred HV (set ${{fmt(d.voltage_set_V, 1)}} V)`));
+      cards.push(eCard(d.delta_V != null ? `${{fmt(d.delta_V, 1)}} V` : 'n/a', 'inferred - set HV'));
+      cards.push(eCard(`${{fmt(d.hv_discrepancy_MHz, 2)}} MHz`, 'rest-freq error from set HV'));
+      cards.push(eCard(`${{fmt(d.doppler_offset_collinear_MHz, 1)}} / ${{fmt(d.doppler_offset_anticollinear_MHz, 1)}}`, 'Doppler offset col / anti MHz (lab->rest)'));
+      energySummary.innerHTML = cards.join('');
+      energyPlot.innerHTML = d.plot_url ? `<figure><img src="${{d.plot_url}}" alt="Collinear and anti-collinear centroid fits"></figure>` : `<p class="empty">No plot. ${{d.plot_error || ''}}</p>`;
+      const col = d.collinear || {{}}, anti = d.anticollinear || {{}};
+      let detail = `collinear centroid ${{fmt(col.center_GHz, 4)}} GHz (+/- ${{fmt(col.center_unc_MHz, 2)}} MHz, n=${{col.n_points || 0}}); anti-collinear ${{fmt(anti.center_GHz, 4)}} GHz (+/- ${{fmt(anti.center_unc_MHz, 2)}} MHz, n=${{anti.n_points || 0}}).`;
+      if (d.geometry_swapped) detail += ' Warning: anti-collinear centroid is higher than collinear - the two files may be swapped.';
+      energyDetail.textContent = detail;
+    }}
+
+    energyForm.addEventListener('submit', async event => {{
+      event.preventDefault();
+      const btn = energyForm.querySelector('button[type="submit"]');
+      const payload = Object.fromEntries(new FormData(energyForm).entries());
+      try {{
+        setEnergyStatus('Fitting both centroids and computing the correction...', '');
+        const data = await withBusy(btn, () => postJson('/api/energy_correction', payload));
+        renderEnergy(data);
+        setEnergyStatus(`Done. Rest frequency ${{Number(data.rest_frequency_GHz).toFixed(4)}} GHz, beta ${{Number(data.beta).toExponential(3)}}.`, 'ok');
+      }} catch (error) {{
+        setEnergyStatus(error.message, 'err', error.detail);
+      }}
+    }});
+
     refreshLibrary().then(() => setStatus('Library loaded.', 'ok')).catch(error => setStatus(error.message, 'err', error.detail));
   </script>
 </body>
@@ -1539,6 +1886,7 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
                 if not (
                     _is_relative_to(requested, PLOT_DIR.resolve())
                     or _is_relative_to(requested, UNCERTAINTY_PLOT_DIR.resolve())
+                    or _is_relative_to(requested, ENERGY_PLOT_DIR.resolve())
                 ):
                     raise ValueError
             except ValueError:
@@ -1554,13 +1902,32 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/analyze", "/api/rebuild", "/api/delete_row"):
+        if parsed.path not in ("/api/analyze", "/api/rebuild", "/api/delete_row", "/api/energy_correction"):
             self.send_json({"error": "Not found."}, status=404)
             return
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
+
+            if parsed.path == "/api/energy_correction":
+                options = load_default_options()
+                if str(payload.get("bin_width_MHz", "")).strip():
+                    options["bin_width_MHz"] = float(payload["bin_width_MHz"])
+                if str(payload.get("beam_voltage_V", "")).strip():
+                    options["beam_voltage_V"] = float(payload["beam_voltage_V"])
+                collinear = split_file_input(payload.get("collinear_files", ""))
+                anti = split_file_input(payload.get("anticollinear_files", ""))
+                if not collinear or not anti:
+                    raise ValueError("Provide at least one collinear and one anti-collinear file.")
+                label = str(payload.get("isotope") or "").strip()
+                if not label:
+                    raise ValueError("Specify the isotope label (e.g. 32S).")
+                result = compute_beam_energy_correction(
+                    collinear, anti, label, options, payload.get("data_dir") or DEFAULT_DATA_DIR
+                )
+                self.send_json(result)
+                return
 
             if parsed.path == "/api/delete_row":
                 analysis_id = str(payload.get("analysis_id", "")).strip()
