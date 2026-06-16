@@ -485,6 +485,45 @@ def compute_beam_energy_correction(
     }
 
 
+def predict_anticollinear_wn(
+    isotope: str, collinear_wn: float, beam_voltage_V: float, options: dict
+) -> dict:
+    """Predict the anti-collinear search wavenumber from a known collinear reading.
+
+    The two geometries scale as nu_anti/nu_coll = (1-beta)/(1+beta); the ratio carries
+    directly to the (undoubled) wavemeter wavenumber, so wn_anti = wn_coll*(1-beta)/(1+beta).
+    Anti-collinear is the lower-frequency geometry.
+    """
+    if isotope not in SULFUR_MASSES_U:
+        raise ValueError(f"Unknown isotope '{isotope}'. Use one of {sorted(SULFUR_MASSES_U)}.")
+    if not math.isfinite(collinear_wn) or collinear_wn <= 0:
+        raise ValueError("Enter a positive collinear wavemeter reading (cm^-1).")
+    mass_u = float(SULFUR_MASSES_U[isotope])
+    charge = int(options.get("charge_e", 1))
+    neutralization = str(options.get("neutralization", "none"))
+    beta = float(
+        isa.beam_beta_after_cec(
+            mass_u,
+            beam_voltage_V=beam_voltage_V,
+            charge_e=charge,
+            neutralization=neutralization,
+            sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
+            sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
+        )
+    )
+    ratio = (1.0 - beta) / (1.0 + beta)
+    wn_anti = collinear_wn * ratio
+    return {
+        "isotope": isotope,
+        "beta": beta,
+        "beam_voltage_V": beam_voltage_V,
+        "neutralization": neutralization,
+        "collinear_wn": collinear_wn,
+        "anticollinear_wn": wn_anti,
+        "shift_cm": collinear_wn - wn_anti,
+    }
+
+
 def row_to_view(row: dict) -> dict:
     view = dict(row)
     plots = [item for item in str(row.get("plot_files", "")).split(";") if item]
@@ -1477,6 +1516,25 @@ def render_page() -> bytes:
         </div>
         <div id="energy-status" class="status">Provide two same-isotope scans (collinear + anti-collinear).</div>
       </form>
+
+      <div class="uncertainty-panel" style="margin-top:18px">
+        <h2 style="font-size:16px;margin:0 0 10px">Predict anti-collinear search window</h2>
+        <div class="grid2">
+          <div>
+            <label for="predict-wn">Collinear wavemeter (cm&#8315;&#185;, undoubled)</label>
+            <input id="predict-wn" placeholder="12625.20">
+          </div>
+          <div>
+            <label for="predict-hv">Beam HV (V)</label>
+            <input id="predict-hv" value="10000">
+          </div>
+        </div>
+        <div class="help">Uses the isotope field above. No scans needed &mdash; a rough pointer for where to tune.</div>
+        <div class="actions">
+          <button type="button" class="secondary" id="predict-btn">Predict</button>
+        </div>
+        <div id="predict-result" class="meta"></div>
+      </div>
     </section>
     <section>
       <div class="library-head">
@@ -1800,6 +1858,28 @@ def render_page() -> bytes:
       energyDetail.textContent = detail;
     }}
 
+    const predictBtn = document.getElementById('predict-btn');
+    const predictResult = document.getElementById('predict-result');
+    predictBtn.addEventListener('click', async () => {{
+      const iso = (document.getElementById('energy-isotope').value || '32S').trim();
+      const wn = document.getElementById('predict-wn').value.trim();
+      const hv = document.getElementById('predict-hv').value.trim() || '10000';
+      if (!wn) {{ predictResult.textContent = 'Enter the collinear wavemeter reading first.'; return; }}
+      try {{
+        const params = new URLSearchParams({{ isotope: iso, collinear_wn: wn, beam_voltage_V: hv }});
+        const resp = await fetch('/api/predict_anticollinear?' + params.toString());
+        const d = await resp.json();
+        if (!resp.ok) throw new Error(d.error || 'Prediction failed');
+        const lo = (d.anticollinear_wn - 0.1).toFixed(3);
+        const hi = (d.anticollinear_wn + 0.1).toFixed(3);
+        predictResult.innerHTML = `Predicted anti-collinear ${{iso}}: <strong>${{d.anticollinear_wn.toFixed(3)}} cm&#8315;&#185;</strong> ` +
+          `(${{d.shift_cm.toFixed(2)}} cm&#8315;&#185; below collinear; beta ${{Number(d.beta).toExponential(2)}}). ` +
+          `Search ~${{lo}}-${{hi}} cm&#8315;&#185;.`;
+      }} catch (error) {{
+        predictResult.textContent = error.message;
+      }}
+    }});
+
     energyForm.addEventListener('submit', async event => {{
       event.preventDefault();
       const btn = energyForm.querySelector('button[type="submit"]');
@@ -1850,6 +1930,19 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/uncertainty":
             try:
                 self.send_json(uncertainty_summary_from_query(parse_qs(parsed.query)))
+            except Exception as exc:
+                traceback.print_exc()
+                self.send_json({"error": str(exc), "detail": traceback.format_exc()}, status=400)
+            return
+        if parsed.path == "/api/predict_anticollinear":
+            try:
+                query = parse_qs(parsed.query)
+                isotope = str(query.get("isotope", ["32S"])[0] or "32S").strip()
+                collinear_wn = float(query.get("collinear_wn", [""])[0])
+                beam_voltage_V = float(query.get("beam_voltage_V", ["10000"])[0] or 10000.0)
+                self.send_json(
+                    predict_anticollinear_wn(isotope, collinear_wn, beam_voltage_V, load_default_options())
+                )
             except Exception as exc:
                 traceback.print_exc()
                 self.send_json({"error": str(exc), "detail": traceback.format_exc()}, status=400)
