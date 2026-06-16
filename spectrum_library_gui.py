@@ -193,6 +193,7 @@ def inclusion_cuts_from_query(query: dict[str, list[str]]) -> tuple[str, Inclusi
         require_bracket_pass=(query.get("require_bracket_pass", ["1"])[0] not in ("0", "false", "False", "")),
         exclude_background=(query.get("exclude_background", ["1"])[0] not in ("0", "false", "False", "")),
         exclude_boundary=(query.get("exclude_boundary", ["1"])[0] not in ("0", "false", "False", "")),
+        max_abs_pull=parse_optional_float(query.get("max_abs_pull", ["4"])[0]),
     )
     return comparison, cuts
 
@@ -1462,6 +1463,10 @@ def render_page() -> bytes:
             <label for="unc-peak-model">Max peak/model</label>
             <input id="unc-peak-model" value="{MAX_LIBRARY_PEAK_TO_MODEL}">
           </div>
+          <div>
+            <label for="unc-max-pull">Max |pull| (&sigma;)</label>
+            <input id="unc-max-pull" value="4" placeholder="blank = off">
+          </div>
           <label><input type="checkbox" id="unc-bracket" checked style="width:auto"> Require bracket pass</label>
           <label><input type="checkbox" id="unc-exclude-background" checked style="width:auto"> Exclude background runs</label>
           <label><input type="checkbox" id="unc-exclude-boundary" checked style="width:auto"> Exclude boundary runs</label>
@@ -1722,7 +1727,8 @@ def render_page() -> bytes:
         max_peak_to_model: document.getElementById('unc-peak-model').value,
         require_bracket_pass: document.getElementById('unc-bracket').checked ? '1' : '0',
         exclude_background: document.getElementById('unc-exclude-background').checked ? '1' : '0',
-        exclude_boundary: document.getElementById('unc-exclude-boundary').checked ? '1' : '0'
+        exclude_boundary: document.getElementById('unc-exclude-boundary').checked ? '1' : '0',
+        max_abs_pull: document.getElementById('unc-max-pull').value
       }});
       const response = await fetch('/api/uncertainty?' + params.toString());
       const data = await response.json();
@@ -1785,7 +1791,8 @@ def render_page() -> bytes:
         max_peak_to_model: document.getElementById('unc-peak-model').value,
         require_bracket_pass: document.getElementById('unc-bracket').checked ? '1' : '0',
         exclude_background: document.getElementById('unc-exclude-background').checked ? '1' : '0',
-        exclude_boundary: document.getElementById('unc-exclude-boundary').checked ? '1' : '0'
+        exclude_boundary: document.getElementById('unc-exclude-boundary').checked ? '1' : '0',
+        max_abs_pull: document.getElementById('unc-max-pull').value
       }});
       window.location = '/api/export?' + params.toString();
       setStatus('Exporting included set as CSV...', 'ok');

@@ -26,6 +26,7 @@ class InclusionCuts:
     require_bracket_pass: bool = True
     exclude_background: bool = True
     exclude_boundary: bool = True
+    max_abs_pull: float | None = 4.0
 
 
 def safe_float(value: Any, default: float = math.nan) -> float:
@@ -294,6 +295,35 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
             included.append(view)
 
     groups = collapse_runs(included)
+
+    # Iterative pull-based outlier rejection: a run whose value sits more than
+    # max_abs_pull of its own uncertainty from the weighted mean is a precise-but-
+    # inconsistent measurement (usually run-to-run drift). Drop them one at a time,
+    # recomputing the mean each pass, and move their rows to the excluded list.
+    if cuts.max_abs_pull is not None:
+        while len(groups) > 2:
+            vals = np.asarray([g["value_MHz"] for g in groups], dtype=float)
+            sigs = np.asarray([g["sigma_MHz"] for g in groups], dtype=float)
+            weights = 1.0 / np.square(sigs)
+            mean = float(np.sum(weights * vals) / np.sum(weights))
+            pulls = np.abs(vals - mean) / sigs
+            worst = int(np.argmax(pulls))
+            if pulls[worst] <= cuts.max_abs_pull:
+                break
+            dropped = groups.pop(worst)
+            pull_value = float((dropped["value_MHz"] - mean) / dropped["sigma_MHz"])
+            drop_ids = set(dropped.get("analysis_ids", []))
+            remaining = []
+            for row in included:
+                if row.get("analysis_id") in drop_ids:
+                    row["reasons"] = list(row.get("reasons", [])) + [
+                        f"pull {pull_value:+.1f} sigma outlier (> {cuts.max_abs_pull:.0f})"
+                    ]
+                    excluded.append(row)
+                else:
+                    remaining.append(row)
+            included = remaining
+
     values = np.asarray([group["value_MHz"] for group in groups], dtype=float)
     sigmas = np.asarray([group["sigma_MHz"] for group in groups], dtype=float)
 
@@ -316,6 +346,7 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
             "min_points_per_isotope": cuts.min_points_per_isotope,
             "max_peak_to_model": cuts.max_peak_to_model,
             "require_bracket_pass": cuts.require_bracket_pass,
+            "max_abs_pull": cuts.max_abs_pull,
         },
         "included": included,
         "excluded": excluded,
