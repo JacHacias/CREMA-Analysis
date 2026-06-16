@@ -460,7 +460,14 @@ def hene_correct_wavenumber(
         )
     else:
         reference = float(np.nanmedian(hene_wn[finite]))
-    return wn_cm - (hene_wn - reference)
+    # Wavemeter drift is a fractional (scale) error, so rescale the target line by the
+    # ratio measured on the HeNe rather than subtracting the HeNe offset directly. An
+    # additive correction over-applies the offset by (target_wn/hene_wn) ~ 0.8 and, once
+    # the laser is frequency-doubled, leaves a large absolute error. Rows without a
+    # finite HeNe reading are dropped (NaN) as before.
+    corrected = np.full(wn_cm.shape, np.nan, dtype=float)
+    corrected[finite] = wn_cm[finite] * (reference / hene_wn[finite])
+    return corrected
 
 
 def _lab_frequency_and_voltage(
