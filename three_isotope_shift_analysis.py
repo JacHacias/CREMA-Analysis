@@ -202,6 +202,44 @@ def doppler_correct_ghz(
     return np.asarray(nu_lab_ghz, dtype=float) * factor
 
 
+def _refine_with_linear_background(x, counts, popt0):
+    """Refit Voigt + linear background over the full spectrum, seeded from the windowed
+    Voigt fit, to capture the sloped pedestal that biases a windowed flat-background
+    centroid. Returns a 5-parameter Voigt-compatible popt (background = linear term at the
+    center) and uncertainties, or None if the refit fails or moves the center too far."""
+    x = np.asarray(x, dtype=float)
+    counts = np.asarray(counts, dtype=float)
+    if x.size < 8 or not np.isfinite(popt0[1]):
+        return None
+    A0, c0, sg0, gl0, bg0 = (float(v) for v in popt0)
+    span = float(x.max() - x.min())
+    if span <= 0:
+        return None
+    yerr = np.sqrt(np.clip(counts, 1.0, None))
+
+    def model(xx, A, c, sg, gl, b0, b1):
+        return voigt(xx, A, c, sg, gl, 0.0) + b0 + b1 * xx
+
+    lower = [0.0, x.min(), 1e-3, 1e-3, -np.inf, -np.inf]
+    upper = [np.inf, x.max(), span, span, np.inf, np.inf]
+    p0 = [max(A0, 1.0), c0, max(sg0, 1e-3), max(gl0, 1e-3), max(bg0, 0.0), 0.0]
+    p0 = [min(max(v, lo), hi) if np.isfinite(hi) else max(v, lo) for v, lo, hi in zip(p0, lower, upper)]
+    try:
+        popt6, pcov = curve_fit(
+            model, x, counts, p0=p0, sigma=yerr, absolute_sigma=True,
+            bounds=(lower, upper), maxfev=40000,
+        )
+    except Exception:
+        return None
+    A, c, sg, gl, b0, b1 = (float(v) for v in popt6)
+    if not np.isfinite(c) or abs(c - c0) > max(0.3, 3.0 * (sg + gl)):
+        return None
+    perr6 = np.sqrt(np.diag(pcov)) if pcov is not None and np.all(np.isfinite(pcov)) else np.full(6, np.nan)
+    popt5 = np.array([A, c, sg, gl, max(b0 + b1 * c, 0.0)], dtype=float)
+    perr5 = np.array([perr6[0], perr6[1], perr6[2], perr6[3], np.nan], dtype=float)
+    return popt5, perr5
+
+
 def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
     counts = np.asarray(counts, dtype=float)
     x = np.asarray(x, dtype=float)
@@ -362,6 +400,14 @@ def fit_histogram_peak(x, counts, smooth_sigma_bins=2):
             popt, perr = popt_retry, perr_retry
     if not np.isfinite(perr[1]):
         perr[1] = _fallback_center_uncertainty(x_fit, y_fit, popt[2], popt[3], popt[4])
+
+    # Full-range Voigt + linear-background refinement (captures the sloped pedestal that
+    # biases a windowed flat-background centroid). Falls back to the windowed result.
+    refined = _refine_with_linear_background(x, counts, popt)
+    if refined is not None:
+        popt, perr = refined
+        if not np.isfinite(perr[1]):
+            perr[1] = _fallback_center_uncertainty(x_fit, y_fit, popt[2], popt[3], popt[4])
 
     return popt, None, perr, x_fit
 
