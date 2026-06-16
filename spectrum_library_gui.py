@@ -191,6 +191,8 @@ def inclusion_cuts_from_query(query: dict[str, list[str]]) -> tuple[str, Inclusi
         min_points_per_isotope=int(float(query.get("min_points_per_isotope", ["100"])[0] or 100)),
         max_peak_to_model=parse_optional_float(query.get("max_peak_to_model", ["2.0"])[0]),
         require_bracket_pass=(query.get("require_bracket_pass", ["1"])[0] not in ("0", "false", "False", "")),
+        exclude_background=(query.get("exclude_background", ["1"])[0] not in ("0", "false", "False", "")),
+        exclude_boundary=(query.get("exclude_boundary", ["1"])[0] not in ("0", "false", "False", "")),
     )
     return comparison, cuts
 
@@ -1461,6 +1463,8 @@ def render_page() -> bytes:
             <input id="unc-peak-model" value="{MAX_LIBRARY_PEAK_TO_MODEL}">
           </div>
           <label><input type="checkbox" id="unc-bracket" checked style="width:auto"> Require bracket pass</label>
+          <label><input type="checkbox" id="unc-exclude-background" checked style="width:auto"> Exclude background runs</label>
+          <label><input type="checkbox" id="unc-exclude-boundary" checked style="width:auto"> Exclude boundary runs</label>
           <button type="button" id="unc-refresh">Run</button>
           <button type="button" class="secondary" id="unc-export">Export included set</button>
         </div>
@@ -1716,7 +1720,9 @@ def render_page() -> bytes:
         total_unc_cut_MHz: document.getElementById('unc-total-cut').value,
         min_points_per_isotope: document.getElementById('unc-min-points').value,
         max_peak_to_model: document.getElementById('unc-peak-model').value,
-        require_bracket_pass: document.getElementById('unc-bracket').checked ? '1' : '0'
+        require_bracket_pass: document.getElementById('unc-bracket').checked ? '1' : '0',
+        exclude_background: document.getElementById('unc-exclude-background').checked ? '1' : '0',
+        exclude_boundary: document.getElementById('unc-exclude-boundary').checked ? '1' : '0'
       }});
       const response = await fetch('/api/uncertainty?' + params.toString());
       const data = await response.json();
@@ -1777,7 +1783,9 @@ def render_page() -> bytes:
         total_unc_cut_MHz: document.getElementById('unc-total-cut').value,
         min_points_per_isotope: document.getElementById('unc-min-points').value,
         max_peak_to_model: document.getElementById('unc-peak-model').value,
-        require_bracket_pass: document.getElementById('unc-bracket').checked ? '1' : '0'
+        require_bracket_pass: document.getElementById('unc-bracket').checked ? '1' : '0',
+        exclude_background: document.getElementById('unc-exclude-background').checked ? '1' : '0',
+        exclude_boundary: document.getElementById('unc-exclude-boundary').checked ? '1' : '0'
       }});
       window.location = '/api/export?' + params.toString();
       setStatus('Exporting included set as CSV...', 'ok');

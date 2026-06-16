@@ -24,6 +24,8 @@ class InclusionCuts:
     min_points_per_isotope: int = 100
     max_peak_to_model: float | None = 2.0
     require_bracket_pass: bool = True
+    exclude_background: bool = True
+    exclude_boundary: bool = True
 
 
 def safe_float(value: Any, default: float = math.nan) -> float:
@@ -255,6 +257,11 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
         if str(row.get("comparison", "")) != cuts.comparison:
             continue
         reasons: list[str] = []
+        run_text = f"{row.get('run_label', '')} {row.get('collection_time', '')}".lower()
+        if cuts.exclude_background and ("background" in run_text or "_back" in run_text):
+            reasons.append("background run")
+        if cuts.exclude_boundary and "boundary" in run_text:
+            reasons.append("boundary run")
         shift = safe_float(row.get("isotope_shift_MHz"))
         fit_unc = safe_float(row.get("isotope_shift_fit_unc_MHz"))
         total_unc = safe_float(row.get("isotope_shift_total_unc_MHz"))
