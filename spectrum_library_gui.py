@@ -68,6 +68,33 @@ SUMMARY_PLOT_DIR = ROOT / "analysis_plots" / "library_summary"
 UNCERTAINTY_PLOT_DIR = ROOT / "uncertainty_plots"
 ENERGY_PLOT_DIR = ROOT / "energy_plots"
 EXPORTS_DIR = ROOT / "exports"
+ENERGY_LIBRARY_CSV = ROOT / "data_library" / "energy_correction_library.csv"
+ENERGY_LIBRARY_JSONL = ROOT / "data_library" / "energy_correction_library.jsonl"
+ENERGY_LIBRARY_COLUMNS = [
+    "analysis_timestamp",
+    "isotope",
+    "neutralization",
+    "collinear_files",
+    "anticollinear_files",
+    "collinear_centroid_GHz",
+    "collinear_centroid_unc_MHz",
+    "anticollinear_centroid_GHz",
+    "anticollinear_centroid_unc_MHz",
+    "rest_frequency_GHz",
+    "rest_frequency_unc_MHz",
+    "beta",
+    "beta_unc",
+    "gamma",
+    "velocity_m_s",
+    "ke_probed_eV",
+    "ke_probed_unc_eV",
+    "ke_ion_eV",
+    "voltage_inferred_V",
+    "voltage_inferred_unc_V",
+    "voltage_set_V",
+    "delta_V",
+    "notes",
+]
 CONFIG_PATH = ROOT / "analysis_defaults.json"
 MIN_LIBRARY_POINTS_PER_ISOTOPE = 100
 MAX_LIBRARY_PEAK_TO_MODEL = 2.0
@@ -486,6 +513,77 @@ def compute_beam_energy_correction(
         "plot_url": plot_view,
         "plot_error": plot_error,
     }
+
+
+def energy_result_to_row(
+    result: dict, collinear_files: list[str], anti_files: list[str], notes: str
+) -> dict:
+    """Flatten a beam-energy-correction result into one library row."""
+    col = result.get("collinear", {})
+    anti = result.get("anticollinear", {})
+
+    def num(value):
+        return value if value is None else float(value)
+
+    return {
+        "analysis_timestamp": datetime.now().isoformat(timespec="seconds"),
+        "isotope": result.get("isotope", ""),
+        "neutralization": result.get("neutralization", ""),
+        "collinear_files": ";".join(collinear_files),
+        "anticollinear_files": ";".join(anti_files),
+        "collinear_centroid_GHz": num(col.get("center_GHz")),
+        "collinear_centroid_unc_MHz": num(col.get("center_unc_MHz")),
+        "anticollinear_centroid_GHz": num(anti.get("center_GHz")),
+        "anticollinear_centroid_unc_MHz": num(anti.get("center_unc_MHz")),
+        "rest_frequency_GHz": num(result.get("rest_frequency_GHz")),
+        "rest_frequency_unc_MHz": num(result.get("rest_frequency_unc_MHz")),
+        "beta": num(result.get("beta")),
+        "beta_unc": num(result.get("beta_unc")),
+        "gamma": num(result.get("gamma")),
+        "velocity_m_s": num(result.get("velocity_m_s")),
+        "ke_probed_eV": num(result.get("ke_probed_eV")),
+        "ke_probed_unc_eV": num(result.get("ke_probed_unc_eV")),
+        "ke_ion_eV": num(result.get("ke_ion_eV")),
+        "voltage_inferred_V": num(result.get("voltage_inferred_V")),
+        "voltage_inferred_unc_V": num(result.get("voltage_inferred_unc_V")),
+        "voltage_set_V": num(result.get("voltage_set_V")),
+        "delta_V": num(result.get("delta_V")),
+        "notes": notes or "",
+    }
+
+
+def read_energy_library() -> list[dict]:
+    if not ENERGY_LIBRARY_CSV.exists():
+        return []
+    with ENERGY_LIBRARY_CSV.open("r", newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
+def append_energy_row(row: dict) -> dict:
+    """Append a measurement, replacing any existing row with the same isotope + file set."""
+    rows = read_energy_library()
+    key = (row["isotope"], row["collinear_files"], row["anticollinear_files"])
+    rows = [
+        r for r in rows
+        if (r.get("isotope",""), r.get("collinear_files",""), r.get("anticollinear_files","")) != key
+    ]
+    rows.append(row)
+    with MUTATION_LOCK:
+        _write_csv_columns(ENERGY_LIBRARY_CSV, ENERGY_LIBRARY_COLUMNS, rows)
+        ENERGY_LIBRARY_JSONL.parent.mkdir(parents=True, exist_ok=True)
+        with ENERGY_LIBRARY_JSONL.open("w", encoding="utf-8") as handle:
+            for r in rows:
+                handle.write(json.dumps(r, sort_keys=True) + "\n")
+    return {"saved": row, "count": len(rows)}
+
+
+def _write_csv_columns(path: Path, columns: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({c: row.get(c, "") for c in columns})
 
 
 def predict_anticollinear_wn(
@@ -1553,6 +1651,16 @@ def render_page() -> bytes:
       <div id="energy-summary" class="summary-cards"></div>
       <div id="energy-plot" class="plots"><p class="empty">Run the correction to see the two centroid fits.</p></div>
       <div id="energy-detail" class="meta"></div>
+      <div class="actions" style="margin-top:14px">
+        <input id="energy-notes" placeholder="notes (optional)" style="flex:1">
+        <button type="button" id="energy-save">Save measurement</button>
+      </div>
+      <div id="energy-save-status" class="meta"></div>
+      <div class="library-head" style="margin-top:18px">
+        <h2 style="font-size:16px;margin:0">Saved energy measurements</h2>
+        <div class="meta">Persisted to energy_correction_library.csv</div>
+      </div>
+      <div id="energy-saved" class="tiny-table"></div>
     </section>
   </main>
   </div>
@@ -1861,7 +1969,7 @@ def render_page() -> bytes:
       cards.push(eCard(`${{fmt(d.velocity_m_s, 0)}} m/s`, 'beam velocity'));
       cards.push(eCard(`${{fmt(d.ke_probed_eV, 1)}} eV`, `KE probed species +/- ${{fmt(d.ke_probed_unc_eV, 1)}} eV`));
       cards.push(eCard(d.ke_ion_eV != null ? `${{fmt(d.ke_ion_eV, 1)}} eV` : 'n/a', 'inferred ion-beam KE'));
-      cards.push(eCard(d.voltage_inferred_V != null ? `${{fmt(d.voltage_inferred_V, 1)}} V` : 'n/a', `inferred HV (set ${{fmt(d.voltage_set_V, 1)}} V)`));
+      cards.push(eCard(d.voltage_inferred_V != null ? `${{fmt(d.voltage_inferred_V, 1)}} +/- ${{fmt(d.voltage_inferred_unc_V, 3)}} V` : 'n/a', `inferred HV (stat; set ${{fmt(d.voltage_set_V, 1)}} V)`));
       cards.push(eCard(d.delta_V != null ? `${{fmt(d.delta_V, 1)}} V` : 'n/a', 'inferred - set HV'));
       cards.push(eCard(`${{fmt(d.hv_discrepancy_MHz, 2)}} MHz`, 'rest-freq error from set HV'));
       cards.push(eCard(`${{fmt(d.doppler_offset_collinear_MHz, 1)}} / ${{fmt(d.doppler_offset_anticollinear_MHz, 1)}}`, 'Doppler offset col / anti MHz (lab->rest)'));
@@ -1909,6 +2017,43 @@ def render_page() -> bytes:
       }}
     }});
 
+    function renderEnergySaved(rows) {{
+      const saved = document.getElementById('energy-saved');
+      if (!rows || !rows.length) {{ saved.innerHTML = '<p class="empty">No saved measurements yet.</p>'; return; }}
+      const rowHtml = row => `
+        <tr>
+          <td>${{(row.analysis_timestamp || '').replace('T', ' ')}}</td>
+          <td>${{row.isotope || ''}}</td>
+          <td>${{fmt(row.rest_frequency_GHz, 4)}}</td>
+          <td>${{fmt(row.voltage_inferred_V, 1)}} +/- ${{fmt(row.voltage_inferred_unc_V, 3)}}</td>
+          <td>${{fmt(row.voltage_set_V, 1)}}</td>
+          <td>${{fmt(row.delta_V, 1)}}</td>
+          <td>${{expo(row.beta, 3)}}</td>
+          <td>${{row.notes || ''}}</td>
+        </tr>`;
+      saved.innerHTML = '<table><thead><tr><th>Saved</th><th>Iso</th><th>&nu;&#8320; GHz</th><th>Inferred HV (V)</th><th>Set HV</th><th>&Delta;V</th><th>beta</th><th>Notes</th></tr></thead><tbody>' + rows.map(rowHtml).join('') + '</tbody></table>';
+    }}
+
+    async function loadEnergySaved() {{
+      try {{ const resp = await fetch('/api/energy_library'); const d = await resp.json(); renderEnergySaved(d.rows || []); }} catch (error) {{}}
+    }}
+
+    document.getElementById('energy-save').addEventListener('click', async event => {{
+      const btn = event.currentTarget;
+      const payload = Object.fromEntries(new FormData(energyForm).entries());
+      payload.notes = document.getElementById('energy-notes').value || '';
+      const ss = document.getElementById('energy-save-status');
+      if (!payload.collinear_files || !payload.anticollinear_files) {{ ss.textContent = 'Provide collinear and anti-collinear files first.'; return; }}
+      try {{
+        ss.textContent = 'Fitting and saving...';
+        const data = await withBusy(btn, () => postJson('/api/energy_save', payload));
+        renderEnergy(data);
+        renderEnergySaved(data.energy_library || []);
+        ss.textContent = `Saved. ${{data.saved_count}} measurement(s) in the library.`;
+      }} catch (error) {{ ss.textContent = error.message; }}
+    }});
+
+    loadEnergySaved();
     refreshLibrary().then(() => setStatus('Library loaded.', 'ok')).catch(error => setStatus(error.message, 'err', error.detail));
   </script>
 </body>
@@ -1948,6 +2093,9 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
             except Exception as exc:
                 traceback.print_exc()
                 self.send_json({"error": str(exc), "detail": traceback.format_exc()}, status=400)
+            return
+        if parsed.path == "/api/energy_library":
+            self.send_json({"rows": read_energy_library()[::-1]})
             return
         if parsed.path == "/api/predict_anticollinear":
             try:
@@ -2010,7 +2158,7 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path not in ("/api/analyze", "/api/rebuild", "/api/delete_row", "/api/energy_correction"):
+        if parsed.path not in ("/api/analyze", "/api/rebuild", "/api/delete_row", "/api/energy_correction", "/api/energy_save"):
             self.send_json({"error": "Not found."}, status=404)
             return
 
@@ -2018,7 +2166,7 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
 
-            if parsed.path == "/api/energy_correction":
+            if parsed.path in ("/api/energy_correction", "/api/energy_save"):
                 options = load_default_options()
                 if str(payload.get("bin_width_MHz", "")).strip():
                     options["bin_width_MHz"] = float(payload["bin_width_MHz"])
@@ -2034,6 +2182,12 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
                 result = compute_beam_energy_correction(
                     collinear, anti, label, options, payload.get("data_dir") or DEFAULT_DATA_DIR
                 )
+                if parsed.path == "/api/energy_save":
+                    row = energy_result_to_row(result, collinear, anti, payload.get("notes", ""))
+                    saved = append_energy_row(row)
+                    result["saved_row"] = row
+                    result["energy_library"] = read_energy_library()[::-1]
+                    result["saved_count"] = saved["count"]
                 self.send_json(result)
                 return
 
