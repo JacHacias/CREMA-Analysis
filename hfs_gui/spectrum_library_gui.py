@@ -713,6 +713,8 @@ def compute_global_energy_average(options: dict | None = None) -> dict:
             "vu": vu if (vu is not None and vu > 0) else None,
             "iso": str(r.get("isotope", "")).strip(),
             "beta": f(r.get("beta")),
+            "vset": f(r.get("voltage_set_V")),
+            "dv": f(r.get("delta_V")),
             "timestamp": r.get("analysis_timestamp", ""),
         })
     n = len(entries)
@@ -735,6 +737,11 @@ def compute_global_energy_average(options: dict | None = None) -> dict:
         scatter_sem = entries[0]["vu"] or 0.0
         v_unc = scatter_sem
     internal = None
+
+    dvs = [e["dv"] for e in entries if e["dv"] is not None]
+    voltage_offset = (sum(dvs) / len(dvs)) if dvs else None
+    vsets = [e["vset"] for e in entries if e["vset"] is not None]
+    vset_global = (sum(vsets) / len(vsets)) if vsets else None
 
     isotopes = sorted({e["iso"] for e in entries if e["iso"]})
     per_iso = {}
@@ -760,6 +767,8 @@ def compute_global_energy_average(options: dict | None = None) -> dict:
         "voltage_internal_unc_V": internal,
         "voltage_scatter_sem_V": scatter_sem,
         "voltage_scatter_sd_V": sd,
+        "voltage_set_global_V": vset_global,
+        "voltage_offset_V": voltage_offset,
         "ke_ion_eV": charge * vmean,
         "per_isotope_beta": per_iso,
         "measurements": [
@@ -767,6 +776,24 @@ def compute_global_energy_average(options: dict | None = None) -> dict:
             for e in entries
         ],
     }
+
+
+def energy_voltage_offset_V() -> float | None:
+    """Global beam-voltage offset (inferred - recorded) measured by the collinear/
+    anti-collinear energy library, to be added to the per-shot voltage in IS analysis.
+    Returns None if there are no saved energy measurements."""
+    try:
+        g = compute_global_energy_average()
+    except Exception:
+        return None
+    if not g.get("available"):
+        return None
+    off = g.get("voltage_offset_V")
+    try:
+        off = float(off)
+    except (TypeError, ValueError):
+        return None
+    return off if math.isfinite(off) else None
 
 
 def predict_anticollinear_wn(
@@ -1357,6 +1384,15 @@ def options_from_payload(payload: dict) -> dict:
     if str(payload.get("beam_voltage_unc_V", "")).strip():
         options["beam_voltage_unc_V"] = float(payload["beam_voltage_unc_V"])
     options["auto_remove_bad_scans"] = bool(payload.get("auto_remove_bad_scans"))
+    # Apply the measured beam-energy correction (voltage offset from the col/anti energy
+    # library) to the per-shot voltage, unless explicitly disabled. Default on so it is
+    # used automatically.
+    apply_energy = str(payload.get("apply_energy_correction", "on")).strip().lower() not in ("", "0", "false", "off", "no")
+    if apply_energy:
+        offset = energy_voltage_offset_V()
+        if offset is not None:
+            options["voltage_offset_V"] = float(options.get("voltage_offset_V", 0.0) or 0.0) + offset
+            options["energy_voltage_offset_applied_V"] = offset
     return options
 
 
@@ -1629,6 +1665,9 @@ def render_page() -> bytes:
 
         <label><input type="checkbox" name="auto_remove_bad_scans" checked style="width:auto"> Auto-remove bad scan passes</label>
         <div class="help">Drops incomplete, low-count, invalid, or outlier scan passes before fitting.</div>
+
+        <label><input type="checkbox" name="apply_energy_correction" checked style="width:auto"> Apply measured beam-energy correction</label>
+        <div class="help" id="energy-corr-help">Adds the measured beam-voltage offset (from the collinear/anti-collinear energy library) to the recorded voltage before the Doppler correction.</div>
 
         <label><input type="checkbox" name="update_existing_day" style="width:auto"> Replace matching day/run entry</label>
         <div class="help">Optional. If checked, matching saved rows for the date/run label are replaced instead of appending new adjacent-pair rows.</div>
@@ -2052,6 +2091,7 @@ def render_page() -> bytes:
       const start = payload.collection_time_start || '';
       const end = payload.collection_time_end || '';
       payload.collection_time = (start && end) ? (start + '-' + end) : (start || end || '');
+      payload.apply_energy_correction = form.elements.apply_energy_correction.checked ? 'on' : '0';
       try {{
         setStatus('Running fit and saving spectrum library rows...', '');
         const data = await withBusy(submitBtn, () => postJson('/api/analyze', payload));
@@ -2103,6 +2143,7 @@ def render_page() -> bytes:
       const payload = {{
         data_dir: document.getElementById('data-dir').value,
         auto_remove_bad_scans: form.elements.auto_remove_bad_scans.checked ? 'on' : '',
+        apply_energy_correction: form.elements.apply_energy_correction.checked ? 'on' : '0',
         include_background: form.elements.include_background.checked ? 'on' : '',
         include_36s: form.elements.include_36s.checked ? 'on' : '',
         tof_gate_32S: document.getElementById('tof-gate-32').value,
@@ -2251,9 +2292,16 @@ def render_page() -> bytes:
 
     async function loadGlobalEnergy() {{
       const el = document.getElementById('energy-global');
+      const help = document.getElementById('energy-corr-help');
       try {{
         const resp = await fetch('/api/energy_global');
         const d = await resp.json();
+        if (help) {{
+          if (d.available && d.voltage_offset_V != null)
+            help.textContent = `Adds the measured beam-voltage offset (+${{fmt(d.voltage_offset_V, 1)}} V, from ${{d.n_measurements}} energy measurement(s)) to the recorded voltage before the Doppler correction.`;
+          else
+            help.textContent = 'No saved energy measurements yet, so no voltage offset is applied (uses the recorded voltage as-is).';
+        }}
         if (!d.available) {{ el.innerHTML = '<p class="empty">' + (d.reason || 'No saved measurements yet.') + '</p>'; return; }}
         const cards = [];
         cards.push(eCard(`${{fmt(d.voltage_global_V, 1)}} +/- ${{fmt(d.voltage_global_unc_V, 2)}} V`, `global beam voltage (${{d.n_measurements}} measurement(s), ${{(d.isotopes || []).join('/')}})`));
