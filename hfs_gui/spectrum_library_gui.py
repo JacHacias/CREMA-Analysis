@@ -99,9 +99,12 @@ ENERGY_LIBRARY_COLUMNS = [
 CONFIG_PATH = ROOT / "analysis_defaults.json"
 MIN_LIBRARY_POINTS_PER_ISOTOPE = 100
 MAX_LIBRARY_PEAK_TO_MODEL = 2.0
+# Windows are wide enough to admit both the raw (recorded-HV) shifts and the larger
+# values after the measured beam-energy correction (~+170 MHz for 34S, ~+315 for 36S),
+# since the single-geometry isotope shift is strongly beam-energy dependent.
 LIBRARY_SHIFT_WINDOWS_MHZ = {
-    "34S-32S": (340.0, 455.0),
-    "36S-32S": (600.0, 1000.0),
+    "34S-32S": (340.0, 750.0),
+    "36S-32S": (600.0, 1400.0),
 }
 
 # matplotlib's pyplot state is process-global and not thread-safe; serialize all
