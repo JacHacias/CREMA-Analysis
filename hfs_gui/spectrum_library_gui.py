@@ -233,6 +233,26 @@ def uncertainty_summary_from_query(query: dict[str, list[str]]) -> dict:
     comparison, cuts = inclusion_cuts_from_query(query)
     rows = read_library_csv(LIBRARY_CSV)
     result = analyze_library_uncertainty(rows, cuts)
+
+    # Fold in the beam-energy systematic d(IS)/dV * sigma_V (correlated across all rows),
+    # from the global beam-voltage uncertainty, into the reported total uncertainties.
+    be = beam_energy_systematic_MHz(comparison)
+    be_sys = float(be.get("systematic_MHz") or 0.0) if be.get("available") else 0.0
+    result["beam_energy"] = be
+    result["beam_energy_systematic_MHz"] = be_sys if be.get("available") else None
+    freq = result.get("frequentist")
+    if isinstance(freq, dict):
+        stat = float(freq.get("weighted_scatter_sem_MHz") or 0.0)
+        persys = float(freq.get("systematic_unc_MHz") or 0.0)
+        freq["beam_energy_systematic_MHz"] = be_sys
+        freq["total_unc_MHz"] = math.sqrt(stat ** 2 + persys ** 2 + be_sys ** 2)
+    bayes = result.get("bayesian")
+    if isinstance(bayes, dict) and bayes.get("available"):
+        persys_b = float(bayes.get("systematic_unc_MHz") or 0.0)
+        mu_sd = float(bayes.get("mu_sd_MHz") or 0.0)
+        bayes["beam_energy_systematic_MHz"] = be_sys
+        bayes["mu_total_unc_MHz"] = math.sqrt(mu_sd ** 2 + persys_b ** 2 + be_sys ** 2)
+
     # Reuse a stable per-comparison filename so this directory does not grow
     # without bound; plot_url() appends an mtime version for cache-busting.
     UNCERTAINTY_PLOT_DIR.mkdir(parents=True, exist_ok=True)
@@ -797,6 +817,57 @@ def energy_voltage_offset_V() -> float | None:
     except (TypeError, ValueError):
         return None
     return off if math.isfinite(off) else None
+
+
+def beam_energy_systematic_MHz(comparison: str, options: dict | None = None) -> dict:
+    """Correlated isotope-shift systematic from the global beam-voltage uncertainty.
+
+    The single-geometry shift depends on beam energy: d(IS)/dV = (nu0/2V)|beta_cmp-beta_ref|.
+    Multiplying by the global voltage uncertainty sigma_V gives a correlated systematic
+    common to every row in the comparison. Returns {available: False} if no energy data.
+    """
+    options = load_default_options() if options is None else options
+    g = compute_global_energy_average()
+    if not g.get("available"):
+        return {"available": False, "reason": "No saved energy measurements."}
+    voltage = g.get("voltage_global_V")
+    sigma_v = g.get("voltage_global_unc_V")
+    if not voltage or sigma_v is None or not math.isfinite(float(sigma_v)):
+        return {"available": False, "reason": "No global voltage uncertainty."}
+    match = re.match(r"^\s*(3[246]S)\s*-\s*(3[246]S)\s*$", str(comparison))
+    if not match:
+        return {"available": False, "reason": f"Cannot parse comparison '{comparison}'."}
+    cmp_iso, ref_iso = match.group(1), match.group(2)
+    if cmp_iso not in SULFUR_MASSES_U or ref_iso not in SULFUR_MASSES_U:
+        return {"available": False, "reason": "Unknown isotope in comparison."}
+    charge = int(options.get("charge_e", 1))
+    neutralization = options.get("neutralization", "none")
+
+    def beta(iso):
+        return float(
+            isa.beam_beta_after_cec(
+                float(SULFUR_MASSES_U[iso]), beam_voltage_V=voltage, charge_e=charge,
+                neutralization=neutralization,
+                sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
+                sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
+            )
+        )
+
+    nu0s = []
+    for r in read_energy_library():
+        try:
+            nu0s.append(float(r.get("rest_frequency_GHz")))
+        except (TypeError, ValueError):
+            pass
+    nu0_GHz = (sum(nu0s) / len(nu0s)) if nu0s else 757000.0
+    d_is_dv = (nu0_GHz / (2.0 * voltage)) * abs(beta(cmp_iso) - beta(ref_iso)) * 1000.0  # MHz/V
+    return {
+        "available": True,
+        "d_IS_dV_MHz_per_V": d_is_dv,
+        "sigma_V": float(sigma_v),
+        "voltage_global_V": float(voltage),
+        "systematic_MHz": d_is_dv * float(sigma_v),
+    }
 
 
 def predict_anticollinear_wn(
@@ -2033,8 +2104,8 @@ def render_page() -> bytes:
         <div class="summary-card"><strong>${{(data.n_included_rows != null ? data.n_included_rows : data.included.length)}} &rarr; ${{(data.n_independent_runs != null ? data.n_independent_runs : '?')}}</strong><span>included rows &rarr; independent runs</span></div>
         <div class="summary-card"><strong>${{data.excluded.length}}</strong><span>excluded rows</span></div>
         <div class="summary-card"><strong>${{fmt(freq.weighted_mean_MHz)}} +/- ${{fmt(freq.weighted_scatter_sem_MHz)}}</strong><span>weighted mean +/- stat SEM MHz</span></div>
-        <div class="summary-card"><strong>${{fmt(data.systematic_unc_MHz)}}</strong><span>correlated HV systematic MHz</span></div>
-        <div class="summary-card"><strong>${{fmt(freq.total_unc_MHz)}}</strong><span>freq total unc (stat (+) sys) MHz</span></div>
+        <div class="summary-card"><strong>${{fmt(data.beam_energy_systematic_MHz)}}</strong><span>beam-energy systematic MHz${{(data.beam_energy && data.beam_energy.available) ? ` (${{fmt(data.beam_energy.d_IS_dV_MHz_per_V,2)}} MHz/V x ${{fmt(data.beam_energy.sigma_V,1)}} V)` : ''}}</span></div>
+        <div class="summary-card"><strong>${{fmt(freq.total_unc_MHz)}}</strong><span>freq total unc (stat (+) beam-E) MHz</span></div>
         <div class="summary-card"><strong>${{fmt(freq.chi2_red)}}</strong><span>reduced chi-squared</span></div>
         <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.mu_mean_MHz) + ' +/- ' + fmt(bayes.mu_sd_MHz) : 'n/a'}}</strong><span>Bayesian shared shift (stat) MHz</span></div>
         <div class="summary-card"><strong>${{bayes.available ? fmt(bayes.mu_total_unc_MHz) : 'n/a'}}</strong><span>Bayesian total unc MHz</span></div>
