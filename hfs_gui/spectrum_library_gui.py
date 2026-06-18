@@ -684,6 +684,91 @@ def _write_csv_columns(path: Path, columns: list[str], rows: list[dict]) -> None
             writer.writerow({c: row.get(c, "") for c in columns})
 
 
+def compute_global_energy_average(options: dict | None = None) -> dict:
+    """Combine every saved energy measurement into one beam-energy correction.
+
+    The inferred beam VOLTAGE is isotope-independent (same beam line), so that is what
+    is averaged across all library rows (inverse-variance weighted, with a scatter-
+    inflated uncertainty). beta is isotope-specific, so it is reported per isotope at
+    the global voltage rather than averaged across isotopes.
+    """
+    options = load_default_options() if options is None else options
+    charge = int(options.get("charge_e", 1))
+
+    def f(value):
+        try:
+            x = float(value)
+            return x if math.isfinite(x) else None
+        except (TypeError, ValueError):
+            return None
+
+    entries = []
+    for r in read_energy_library():
+        v = f(r.get("voltage_inferred_V"))
+        if v is None or v <= 0:
+            continue
+        vu = f(r.get("voltage_inferred_unc_V"))
+        entries.append({
+            "v": v,
+            "vu": vu if (vu is not None and vu > 0) else None,
+            "iso": str(r.get("isotope", "")).strip(),
+            "beta": f(r.get("beta")),
+            "timestamp": r.get("analysis_timestamp", ""),
+        })
+    n = len(entries)
+    if n == 0:
+        return {"available": False, "reason": "No saved energy measurements with an inferred voltage."}
+
+    # Each saved measurement counts once, equally weighted. Inverse-variance weighting
+    # is avoided because per-measurement uncertainties are heterogeneous and over-
+    # confident (a single-pair measurement carries a ~0.03 V statistical error that
+    # would otherwise dominate). The uncertainty is the measurement-to-measurement
+    # scatter SEM, which reflects real run-to-run reproducibility.
+    vs = [e["v"] for e in entries]
+    vmean = sum(vs) / n
+    if n > 1:
+        sd = math.sqrt(sum((x - vmean) ** 2 for x in vs) / (n - 1))
+        scatter_sem = sd / math.sqrt(n)
+        v_unc = scatter_sem
+    else:
+        sd = 0.0
+        scatter_sem = entries[0]["vu"] or 0.0
+        v_unc = scatter_sem
+    internal = None
+
+    isotopes = sorted({e["iso"] for e in entries if e["iso"]})
+    per_iso = {}
+    for iso in isotopes:
+        if iso in SULFUR_MASSES_U:
+            try:
+                per_iso[iso] = float(
+                    isa.beam_beta_after_cec(
+                        float(SULFUR_MASSES_U[iso]), beam_voltage_V=vmean, charge_e=charge,
+                        neutralization=options.get("neutralization", "none"),
+                        sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
+                        sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
+                    )
+                )
+            except Exception:
+                pass
+    return {
+        "available": True,
+        "n_measurements": n,
+        "isotopes": isotopes,
+        "voltage_global_V": vmean,
+        "voltage_global_unc_V": v_unc,
+        "voltage_internal_unc_V": internal,
+        "voltage_scatter_sem_V": scatter_sem,
+        "voltage_scatter_sd_V": sd,
+        "ke_ion_eV": charge * vmean,
+        "per_isotope_beta": per_iso,
+        "measurements": [
+            {"timestamp": e["timestamp"], "isotope": e["iso"], "voltage_V": e["v"], "voltage_unc_V": e["vu"], "beta": e["beta"]}
+            for e in entries
+        ],
+    }
+
+
 def predict_anticollinear_wn(
     isotope: str, collinear_wn: float, beam_voltage_V: float, options: dict
 ) -> dict:
@@ -1756,6 +1841,13 @@ def render_page() -> bytes:
       </div>
       <div id="energy-save-status" class="meta"></div>
       <div class="library-head" style="margin-top:18px">
+        <h2 style="font-size:16px;margin:0">Global beam-energy average (all saved measurements)</h2>
+        <button type="button" class="secondary" id="energy-global-btn">Recompute</button>
+      </div>
+      <div class="meta">Averages the inferred beam voltage across every saved measurement; beta shown per isotope at that voltage.</div>
+      <div id="energy-global" class="summary-cards"></div>
+
+      <div class="library-head" style="margin-top:18px">
         <h2 style="font-size:16px;margin:0">Saved energy measurements</h2>
         <div class="meta">Persisted to energy_correction_library.csv</div>
       </div>
@@ -2157,6 +2249,25 @@ def render_page() -> bytes:
       try {{ const resp = await fetch('/api/energy_library'); const d = await resp.json(); renderEnergySaved(d.rows || []); }} catch (error) {{}}
     }}
 
+    async function loadGlobalEnergy() {{
+      const el = document.getElementById('energy-global');
+      try {{
+        const resp = await fetch('/api/energy_global');
+        const d = await resp.json();
+        if (!d.available) {{ el.innerHTML = '<p class="empty">' + (d.reason || 'No saved measurements yet.') + '</p>'; return; }}
+        const cards = [];
+        cards.push(eCard(`${{fmt(d.voltage_global_V, 1)}} +/- ${{fmt(d.voltage_global_unc_V, 2)}} V`, `global beam voltage (${{d.n_measurements}} measurement(s), ${{(d.isotopes || []).join('/')}})`));
+        cards.push(eCard(`${{fmt(d.ke_ion_eV, 1)}} eV`, 'global ion-beam KE'));
+        cards.push(eCard(`${{fmt(d.voltage_scatter_sem_V, 2)}} V`, 'measurement-to-measurement scatter SEM'));
+        (d.isotopes || []).forEach(iso => {{
+          if (d.per_isotope_beta && d.per_isotope_beta[iso] != null)
+            cards.push(eCard(expo(d.per_isotope_beta[iso], 4), `beta(${{iso}}) at global voltage`));
+        }});
+        el.innerHTML = cards.join('');
+      }} catch (error) {{ el.innerHTML = '<p class="empty">' + error.message + '</p>'; }}
+    }}
+    document.getElementById('energy-global-btn').addEventListener('click', loadGlobalEnergy);
+
     document.getElementById('energy-save').addEventListener('click', async event => {{
       const btn = event.currentTarget;
       const payload = Object.fromEntries(new FormData(energyForm).entries());
@@ -2168,11 +2279,13 @@ def render_page() -> bytes:
         const data = await withBusy(btn, () => postJson('/api/energy_save', payload));
         renderEnergy(data);
         renderEnergySaved(data.energy_library || []);
+        loadGlobalEnergy();
         ss.textContent = `Saved. ${{data.saved_count}} measurement(s) in the library.`;
       }} catch (error) {{ ss.textContent = error.message; }}
     }});
 
     loadEnergySaved();
+    loadGlobalEnergy();
     refreshLibrary().then(() => setStatus('Library loaded.', 'ok')).catch(error => setStatus(error.message, 'err', error.detail));
   </script>
 </body>
@@ -2215,6 +2328,13 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/energy_library":
             self.send_json({"rows": read_energy_library()[::-1]})
+            return
+        if parsed.path == "/api/energy_global":
+            try:
+                self.send_json(compute_global_energy_average())
+            except Exception as exc:
+                traceback.print_exc()
+                self.send_json({"error": str(exc), "detail": traceback.format_exc()}, status=400)
             return
         if parsed.path == "/api/predict_anticollinear":
             try:
