@@ -93,6 +93,7 @@ ENERGY_LIBRARY_COLUMNS = [
     "voltage_inferred_unc_V",
     "voltage_set_V",
     "delta_V",
+    "n_pairs",
     "notes",
 ]
 CONFIG_PATH = ROOT / "analysis_defaults.json"
@@ -393,32 +394,13 @@ def _plot_energy_fits(label: str, col: dict, anti: dict, nu0_GHz: float, path: P
         plt.close(fig)
 
 
-def compute_beam_energy_correction(
-    collinear_files: list[str],
-    anti_files: list[str],
-    label: str,
-    options: dict,
-    data_dir: str | Path,
+def _energy_from_centroids(
+    nu_c: float, sc: float, nu_a: float, sa: float, v_set: float,
+    mass_u: float, charge: int, neutralization: str, options: dict,
 ) -> dict:
-    """Collinear / anti-collinear beam-energy correction for two same-isotope scans.
-
-    nu0 = sqrt(nu_c * nu_a) is the rest frequency independent of beam energy, and the
-    ratio gives beta -> kinetic energy. (collinear factor gamma*(1-beta),
-    anti-collinear gamma*(1+beta).)
-    """
-    if label not in SULFUR_MASSES_U:
-        raise ValueError(f"Unknown isotope '{label}'. Use one of {sorted(SULFUR_MASSES_U)}.")
-    mass_u = float(SULFUR_MASSES_U[label])
-    charge = int(options.get("charge_e", 1))
-    neutralization = str(options.get("neutralization", "none"))
-
-    col = _fit_lab_centroid(_resolve_gui_files(collinear_files, data_dir), label, options)
-    anti = _fit_lab_centroid(_resolve_gui_files(anti_files, data_dir), label, options)
-    nu_c, sc = col["center_GHz"], col["center_unc_GHz"]
-    nu_a, sa = anti["center_GHz"], anti["center_unc_GHz"]
+    """Beam-energy quantities from one collinear and one anti-collinear lab centroid."""
     if nu_c <= 0 or nu_a <= 0:
         raise ValueError("Non-positive lab centroid; check inputs.")
-
     nu0 = math.sqrt(nu_c * nu_a)
     nu0_unc = 0.5 * nu0 * math.sqrt((sc / nu_c) ** 2 + (sa / nu_a) ** 2)
 
@@ -428,7 +410,7 @@ def compute_beam_energy_correction(
     swapped = beta_signed < 0
     beta = abs(beta_signed)
     if beta >= 1.0:
-        raise ValueError("Unphysical beta >= 1 from the two centroids; check the inputs/geometry.")
+        raise ValueError("Unphysical beta >= 1 from the two centroids; check inputs/geometry.")
     gamma = 1.0 / math.sqrt(1.0 - beta ** 2)
     velocity = beta * isa.C
 
@@ -441,14 +423,10 @@ def compute_beam_energy_correction(
     dke_dbeta = m_probed * isa.C ** 2 * gamma ** 3 * beta
     ke_probed_unc_eV = abs(dke_dbeta * beta_unc) / isa.E_CHARGE
 
-    # Infer the original ion-beam voltage by inverting the forward beta(V) model.
     def beta_model(voltage: float) -> float:
         return float(
             isa.beam_beta_after_cec(
-                mass_u,
-                beam_voltage_V=voltage,
-                charge_e=charge,
-                neutralization=neutralization,
+                mass_u, beam_voltage_V=voltage, charge_e=charge, neutralization=neutralization,
                 sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
                 sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
             )
@@ -467,32 +445,16 @@ def compute_beam_energy_correction(
     except Exception:
         v_inferred = None
     ke_ion_eV = charge * v_inferred if v_inferred is not None else None
-
-    v_set = float(np.nanmedian([col["voltage_V_median"], anti["voltage_V_median"]]))
     delta_V = (v_inferred - v_set) if v_inferred is not None else None
 
     rest_from_voltage = float(
         isa.doppler_correct_ghz(
-            nu_c, mass_u, v_set, charge, "collinear",
-            neutralization=neutralization,
+            nu_c, mass_u, v_set, charge, "collinear", neutralization=neutralization,
             sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
             sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
         )
     )
-
-    plot_view, plot_error = "", ""
-    try:
-        plot_path = ENERGY_PLOT_DIR / f"energy_{safe_plot_label(label)}.png"
-        _plot_energy_fits(label, col, anti, nu0, plot_path)
-        plot_view = plot_url(str(plot_path))
-    except Exception as exc:  # the numbers must survive a plotting failure
-        plot_error = str(exc)
-
     return {
-        "isotope": label,
-        "neutralization": neutralization,
-        "collinear": {"center_GHz": nu_c, "center_unc_MHz": sc * 1000.0, "n_points": col["n_points"], "voltage_V": col["voltage_V_median"]},
-        "anticollinear": {"center_GHz": nu_a, "center_unc_MHz": sa * 1000.0, "n_points": anti["n_points"], "voltage_V": anti["voltage_V_median"]},
         "rest_frequency_GHz": nu0,
         "rest_frequency_unc_MHz": nu0_unc * 1000.0,
         "beta": beta,
@@ -510,9 +472,144 @@ def compute_beam_energy_correction(
         "doppler_offset_anticollinear_MHz": (nu0 - nu_a) * 1000.0,
         "hv_discrepancy_MHz": (nu0 - rest_from_voltage) * 1000.0,
         "geometry_swapped": swapped,
+    }
+
+
+def _combine_pairs(pairs: list[dict]) -> dict:
+    """Average per-pair corrections; uncertainties become the scatter SEM across pairs."""
+    def col(key):
+        return [p[key] for p in pairs if p.get(key) is not None and math.isfinite(float(p[key]))]
+
+    def mean_sem(key):
+        vals = col(key)
+        if not vals:
+            return None, None
+        mean = sum(vals) / len(vals)
+        if len(vals) > 1:
+            sd = math.sqrt(sum((x - mean) ** 2 for x in vals) / (len(vals) - 1))
+            return mean, sd / math.sqrt(len(vals))
+        return mean, None
+
+    def mean_only(key):
+        vals = col(key)
+        return (sum(vals) / len(vals)) if vals else None
+
+    nu0_mean, nu0_sem = mean_sem("rest_frequency_GHz")
+    beta_mean, beta_sem = mean_sem("beta")
+    ke_mean, ke_sem = mean_sem("ke_probed_eV")
+    v_mean, v_sem = mean_sem("voltage_inferred_V")
+    return {
+        "rest_frequency_GHz": nu0_mean,
+        "rest_frequency_unc_MHz": (nu0_sem * 1000.0) if nu0_sem is not None else mean_only("rest_frequency_unc_MHz"),
+        "beta": beta_mean,
+        "beta_unc": beta_sem if beta_sem is not None else mean_only("beta_unc"),
+        "gamma": mean_only("gamma"),
+        "velocity_m_s": mean_only("velocity_m_s"),
+        "ke_probed_eV": ke_mean,
+        "ke_probed_unc_eV": ke_sem if ke_sem is not None else mean_only("ke_probed_unc_eV"),
+        "ke_ion_eV": mean_only("ke_ion_eV"),
+        "voltage_inferred_V": v_mean,
+        "voltage_inferred_unc_V": v_sem if v_sem is not None else mean_only("voltage_inferred_unc_V"),
+        "voltage_set_V": mean_only("voltage_set_V"),
+        "delta_V": mean_only("delta_V"),
+        "doppler_offset_collinear_MHz": mean_only("doppler_offset_collinear_MHz"),
+        "doppler_offset_anticollinear_MHz": mean_only("doppler_offset_anticollinear_MHz"),
+        "hv_discrepancy_MHz": mean_only("hv_discrepancy_MHz"),
+        "geometry_swapped": any(p.get("geometry_swapped") for p in pairs),
+    }
+
+
+def compute_beam_energy_correction(
+    collinear_files: list[str],
+    anti_files: list[str],
+    label: str,
+    options: dict,
+    data_dir: str | Path,
+) -> dict:
+    """Collinear / anti-collinear beam-energy correction.
+
+    Pairs collinear[i] with anti-collinear[i] (by list order), computes a correction per
+    pair, and reports the average +/- pair-to-pair scatter SEM at the top. nu0 =
+    sqrt(nu_c * nu_a) is energy-independent; the ratio gives beta -> kinetic energy.
+    """
+    if label not in SULFUR_MASSES_U:
+        raise ValueError(f"Unknown isotope '{label}'. Use one of {sorted(SULFUR_MASSES_U)}.")
+    mass_u = float(SULFUR_MASSES_U[label])
+    charge = int(options.get("charge_e", 1))
+    neutralization = str(options.get("neutralization", "none"))
+
+    col_paths = _resolve_gui_files(collinear_files, data_dir)
+    anti_paths = _resolve_gui_files(anti_files, data_dir)
+
+    def correction_for(col_fit, anti_fit):
+        v_set = float(np.nanmedian([col_fit["voltage_V_median"], anti_fit["voltage_V_median"]]))
+        return _energy_from_centroids(
+            col_fit["center_GHz"], col_fit["center_unc_GHz"],
+            anti_fit["center_GHz"], anti_fit["center_unc_GHz"],
+            v_set, mass_u, charge, neutralization, options,
+        )
+
+    # Pooled fit over all files in each geometry -- drives the plot and is the result
+    # when there is only one scan per geometry.
+    col_pool = _fit_lab_centroid(col_paths, label, options)
+    anti_pool = _fit_lab_centroid(anti_paths, label, options)
+    pooled = correction_for(col_pool, anti_pool)
+
+    # Per-pair corrections (collinear[i] with anti-collinear[i]).
+    n_pairs = min(len(col_paths), len(anti_paths))
+    pairs: list[dict] = []
+    for i in range(n_pairs):
+        try:
+            cf = _fit_lab_centroid([col_paths[i]], label, options)
+            af = _fit_lab_centroid([anti_paths[i]], label, options)
+            entry = correction_for(cf, af)
+        except Exception as exc:
+            pairs.append({"pair_index": i + 1, "error": str(exc),
+                          "collinear_file": Path(col_paths[i]).name,
+                          "anticollinear_file": Path(anti_paths[i]).name})
+            continue
+        entry.update({
+            "pair_index": i + 1,
+            "collinear_file": Path(col_paths[i]).name,
+            "anticollinear_file": Path(anti_paths[i]).name,
+            "collinear_centroid_GHz": cf["center_GHz"],
+            "anticollinear_centroid_GHz": af["center_GHz"],
+            "collinear_n_points": cf["n_points"],
+            "anticollinear_n_points": af["n_points"],
+        })
+        pairs.append(entry)
+
+    valid_pairs = [p for p in pairs if "error" not in p]
+    if len(valid_pairs) >= 2:
+        combined = _combine_pairs(valid_pairs)
+    elif len(valid_pairs) == 1:
+        combined = {k: v for k, v in valid_pairs[0].items() if k in pooled}
+    else:
+        combined = pooled
+
+    plot_view, plot_error = "", ""
+    try:
+        plot_path = ENERGY_PLOT_DIR / f"energy_{safe_plot_label(label)}.png"
+        _plot_energy_fits(label, col_pool, anti_pool, pooled["rest_frequency_GHz"], plot_path)
+        plot_view = plot_url(str(plot_path))
+    except Exception as exc:  # the numbers must survive a plotting failure
+        plot_error = str(exc)
+
+    result = dict(combined)  # top-level fields = the combined average (cards read these)
+    result.update({
+        "isotope": label,
+        "neutralization": neutralization,
+        "collinear": {"center_GHz": col_pool["center_GHz"], "center_unc_MHz": col_pool["center_unc_GHz"] * 1000.0, "n_points": col_pool["n_points"], "voltage_V": col_pool["voltage_V_median"]},
+        "anticollinear": {"center_GHz": anti_pool["center_GHz"], "center_unc_MHz": anti_pool["center_unc_GHz"] * 1000.0, "n_points": anti_pool["n_points"], "voltage_V": anti_pool["voltage_V_median"]},
+        "pooled": pooled,
+        "pairs": pairs,
+        "n_pairs": len(valid_pairs),
+        "n_unpaired_collinear": len(col_paths) - n_pairs,
+        "n_unpaired_anticollinear": len(anti_paths) - n_pairs,
         "plot_url": plot_view,
         "plot_error": plot_error,
-    }
+    })
+    return result
 
 
 def energy_result_to_row(
@@ -548,6 +645,7 @@ def energy_result_to_row(
         "voltage_inferred_unc_V": num(result.get("voltage_inferred_unc_V")),
         "voltage_set_V": num(result.get("voltage_set_V")),
         "delta_V": num(result.get("delta_V")),
+        "n_pairs": result.get("n_pairs"),
         "notes": notes or "",
     }
 
@@ -1651,6 +1749,7 @@ def render_page() -> bytes:
       <div id="energy-summary" class="summary-cards"></div>
       <div id="energy-plot" class="plots"><p class="empty">Run the correction to see the two centroid fits.</p></div>
       <div id="energy-detail" class="meta"></div>
+      <div id="energy-pairs" class="tiny-table" style="margin-top:10px"></div>
       <div class="actions" style="margin-top:14px">
         <input id="energy-notes" placeholder="notes (optional)" style="flex:1">
         <button type="button" id="energy-save">Save measurement</button>
@@ -1976,9 +2075,29 @@ def render_page() -> bytes:
       energySummary.innerHTML = cards.join('');
       energyPlot.innerHTML = d.plot_url ? `<figure><img src="${{d.plot_url}}" alt="Collinear and anti-collinear centroid fits"></figure>` : `<p class="empty">No plot. ${{d.plot_error || ''}}</p>`;
       const col = d.collinear || {{}}, anti = d.anticollinear || {{}};
-      let detail = `collinear centroid ${{fmt(col.center_GHz, 4)}} GHz (+/- ${{fmt(col.center_unc_MHz, 2)}} MHz, n=${{col.n_points || 0}}); anti-collinear ${{fmt(anti.center_GHz, 4)}} GHz (+/- ${{fmt(anti.center_unc_MHz, 2)}} MHz, n=${{anti.n_points || 0}}).`;
+      const np = d.n_pairs || 0;
+      let detail = (np >= 2 ? `Top values = average of ${{np}} pairs (uncertainties are the pair-to-pair scatter SEM). ` : '')
+        + `Pooled centroids: collinear ${{fmt(col.center_GHz, 4)}} GHz (n=${{col.n_points || 0}}); anti-collinear ${{fmt(anti.center_GHz, 4)}} GHz (n=${{anti.n_points || 0}}).`;
       if (d.geometry_swapped) detail += ' Warning: anti-collinear centroid is higher than collinear - the two files may be swapped.';
       energyDetail.textContent = detail;
+
+      const pairs = d.pairs || [];
+      const pairsDiv = document.getElementById('energy-pairs');
+      if (pairs.length <= 1) {{ pairsDiv.innerHTML = ''; }}
+      else {{
+        const pr = p => p.error
+          ? `<tr><td>${{p.pair_index}}</td><td colspan="6">${{p.collinear_file}} / ${{p.anticollinear_file}} - ${{p.error}}</td></tr>`
+          : `<tr>
+              <td>${{p.pair_index}}</td>
+              <td>${{p.collinear_file}}<br>${{p.anticollinear_file}}</td>
+              <td>${{fmt(p.rest_frequency_GHz, 4)}}</td>
+              <td>${{expo(p.beta, 3)}}</td>
+              <td>${{fmt(p.voltage_inferred_V, 1)}}</td>
+              <td>${{fmt(p.delta_V, 1)}}</td>
+              <td>${{fmt(p.hv_discrepancy_MHz, 1)}}</td>
+            </tr>`;
+        pairsDiv.innerHTML = '<table><thead><tr><th>Pair</th><th>Files (col / anti)</th><th>&nu;&#8320; GHz</th><th>beta</th><th>Inf. HV (V)</th><th>&Delta;V</th><th>HV err MHz</th></tr></thead><tbody>' + pairs.map(pr).join('') + '</tbody></table>';
+      }}
     }}
 
     const predictBtn = document.getElementById('predict-btn');
