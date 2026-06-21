@@ -8,10 +8,12 @@ Run with:
 from __future__ import annotations
 
 import csv
+import dataclasses
 import html
 import io
 import json
 import math
+import zipfile
 import mimetypes
 import re
 import shutil
@@ -61,15 +63,32 @@ from library_uncertainty_analysis import (
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = Path(r"C:\Users\EMALAB\Desktop\DBD_daq_emalab\data")
-LIBRARY_CSV = ROOT / "data_library" / "isotope_shift_library.csv"
-LIBRARY_JSONL = ROOT / "data_library" / "isotope_shift_library.jsonl"
+
+
+def _resolve_data_library_dir() -> Path:
+    """Find the directory holding the saved libraries. The runtime files may live next
+    to this script or under an hfs_gui/ subfolder after repo housekeeping, so prefer an
+    existing library, then fall back to the script-relative default for a fresh checkout."""
+    candidates = [ROOT / "data_library", ROOT / "hfs_gui" / "data_library"]
+    for directory in candidates:
+        if (directory / "isotope_shift_library.csv").exists():
+            return directory
+    hits = sorted(ROOT.glob("**/data_library/isotope_shift_library.csv"))
+    if hits:
+        return hits[0].parent
+    return ROOT / "data_library"
+
+
+DATA_LIBRARY_DIR = _resolve_data_library_dir()
+LIBRARY_CSV = DATA_LIBRARY_DIR / "isotope_shift_library.csv"
+LIBRARY_JSONL = DATA_LIBRARY_DIR / "isotope_shift_library.jsonl"
 PLOT_DIR = ROOT / "analysis_plots"
 SUMMARY_PLOT_DIR = ROOT / "analysis_plots" / "library_summary"
 UNCERTAINTY_PLOT_DIR = ROOT / "uncertainty_plots"
 ENERGY_PLOT_DIR = ROOT / "energy_plots"
 EXPORTS_DIR = ROOT / "exports"
-ENERGY_LIBRARY_CSV = ROOT / "data_library" / "energy_correction_library.csv"
-ENERGY_LIBRARY_JSONL = ROOT / "data_library" / "energy_correction_library.jsonl"
+ENERGY_LIBRARY_CSV = DATA_LIBRARY_DIR / "energy_correction_library.csv"
+ENERGY_LIBRARY_JSONL = DATA_LIBRARY_DIR / "energy_correction_library.jsonl"
 ENERGY_LIBRARY_COLUMNS = [
     "analysis_timestamp",
     "isotope",
@@ -102,6 +121,30 @@ LIBRARY_SHIFT_WINDOWS_MHZ = {
     "34S-32S": (340.0, 455.0),
     "36S-32S": (600.0, 1000.0),
 }
+
+# --- Charge-radius extraction --------------------------------------------------
+# Atomic constants come from the theorist GRASP summary table (SI_HFS_IS.txt).
+# Good defaults: the measured 5S2 -> 5P2 transition (table rows 6 and 59), field
+# factor F0. delta<r^2> = (IS - delta nu_MS) / delta F; only the mass factor
+# mu = 1/M' - 1/M changes between isotope pairs.
+CHARGE_RADIUS_DEFAULTS = {"lower_no": 6, "upper_no": 59, "field_col": "F0_GHz_fm2"}
+CHARGE_RADIUS_COMPARISONS = ["34S-32S", "36S-32S"]
+FIELD_COLUMNS = {"F0_GHz_fm2": "F0", "F0VED0_GHz_fm2": "F0VED0"}
+# Reference delta<r^2> from muonic-atom spectroscopy, for a sanity comparison.
+MUONIC_REFERENCE_FM2 = {"34S-32S": 0.15}
+
+# Physical constants for the relativistic beam-energy systematic on the IS.
+_ELECTRON_MASS_U = 5.48579909065e-4
+_AMU_KG = 1.66053906660e-27
+_C_M_S = 299792458.0
+_E_CHARGE_C = 1.602176634e-19
+_TRANSITION_TABLE_CACHE: dict | None = None
+
+
+def _ion_beta(mass_u: float, voltage_V: float, charge: int = 1) -> float:
+    m = (mass_u - charge * _ELECTRON_MASS_U) * _AMU_KG
+    gamma = 1.0 + (charge * _E_CHARGE_C * voltage_V) / (m * _C_M_S * _C_M_S)
+    return math.sqrt(1.0 - 1.0 / gamma ** 2)
 
 # matplotlib's pyplot state is process-global and not thread-safe; serialize all
 # figure generation. A separate lock serializes read-modify-write of the library
@@ -251,6 +294,226 @@ def uncertainty_summary_from_query(query: dict[str, list[str]]) -> dict:
         result["bayesian"].pop("mu_grid_MHz", None)
         result["bayesian"].pop("mu_density", None)
     return result
+
+
+def _find_si_hfs_text() -> tuple[str, str]:
+    """Locate and read the theorist GRASP constants table (SI_HFS_IS.txt), preferring
+    the zip but falling back to a loose .txt, searched relative to the project root."""
+    member = "SI_HFS_IS/SI_HFS_IS.txt"
+    for zip_path in [ROOT / "SI_HFS_IS.zip", *sorted(ROOT.glob("**/SI_HFS_IS.zip"))]:
+        if zip_path.exists():
+            with zipfile.ZipFile(zip_path) as zf:
+                return str(zip_path), zf.read(member).decode("utf-8", "ignore")
+    for txt_path in [ROOT / "SI_HFS_IS.txt", *sorted(ROOT.glob("**/SI_HFS_IS.txt"))]:
+        if txt_path.exists():
+            return str(txt_path), txt_path.read_text(encoding="utf-8", errors="ignore")
+    raise FileNotFoundError(
+        "SI_HFS_IS.zip / SI_HFS_IS.txt not found. Place the theorist constants file "
+        "under the project root."
+    )
+
+
+def load_transition_table(force: bool = False) -> dict:
+    """Parse the GRASP summary table into {level No -> constants}. Cached after first use."""
+    global _TRANSITION_TABLE_CACHE
+    if _TRANSITION_TABLE_CACHE is not None and not force:
+        return _TRANSITION_TABLE_CACHE
+    _src, text = _find_si_hfs_text()
+    table: dict[int, dict] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or not stripped[0].isdigit():
+            continue
+        parts = [p for p in stripped.split() if p != "|"]
+        if len(parts) < 20:
+            continue
+        try:
+            no = int(parts[0])
+            table[no] = {
+                "No": no,
+                "Term": parts[2],
+                "J": parts[3],
+                "Energy_cm1": float(parts[7]),
+                "K_nms_GHz_u": float(parts[11]),
+                "K_sms_GHz_u": float(parts[12]),
+                "F0_GHz_fm2": float(parts[14]),
+                "F0VED0_GHz_fm2": float(parts[18]),
+            }
+        except (ValueError, IndexError):
+            continue
+    if not table:
+        raise ValueError("Parsed no levels from the GRASP constants table.")
+    _TRANSITION_TABLE_CACHE = table
+    return table
+
+
+def transition_constants(lower_no: int, upper_no: int, field_col: str) -> dict:
+    """Transition (upper - lower) mass and field factors for the chosen levels."""
+    table = load_transition_table()
+    if field_col not in FIELD_COLUMNS:
+        raise ValueError(f"Unknown field column {field_col!r}.")
+    if lower_no not in table or upper_no not in table:
+        raise ValueError(f"Level No {lower_no} or {upper_no} not in the constants table.")
+    lo, up = table[lower_no], table[upper_no]
+    dK_nms = up["K_nms_GHz_u"] - lo["K_nms_GHz_u"]
+    dK_sms = up["K_sms_GHz_u"] - lo["K_sms_GHz_u"]
+    return {
+        "lower": lo,
+        "upper": up,
+        "field_col": field_col,
+        "dK_nms_GHz_u": dK_nms,
+        "dK_sms_GHz_u": dK_sms,
+        "dK_tot_GHz_u": dK_nms + dK_sms,
+        "dF_GHz_fm2": up[field_col] - lo[field_col],
+        "transition_cm1": up["Energy_cm1"] - lo["Energy_cm1"],
+    }
+
+
+def beam_energy_systematic(comparison: str) -> dict | None:
+    """Correlated beam-energy systematic on the isotope shift, d(IS)/dV * sigma_V,
+    from the collinear/anti-collinear energy library. Energy rows that share a scan
+    file are not independent (common-mode centroid error), so they are unioned into
+    one cluster and the scatter SEM is taken over independent clusters."""
+    rows = read_energy_library()
+    recs = []
+    for row in rows:
+        v = _float_or_none(row.get("voltage_inferred_V"))
+        if v is None:
+            continue
+        files = set()
+        for col in ("collinear_files", "anticollinear_files"):
+            for f in str(row.get(col, "")).split(";"):
+                f = f.strip()
+                if f:
+                    files.add(f)
+        recs.append({"V": v, "nu0": _float_or_none(row.get("rest_frequency_GHz")), "files": files})
+    if not recs:
+        return None
+    parent = list(range(len(recs)))
+
+    def find(a: int) -> int:
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for i in range(len(recs)):
+        for j in range(i + 1, len(recs)):
+            if recs[i]["files"] & recs[j]["files"]:
+                parent[find(i)] = find(j)
+    clusters: dict[int, list] = {}
+    for i, rec in enumerate(recs):
+        clusters.setdefault(find(i), []).append(rec)
+    voltages = [sum(x["V"] for x in c) / len(c) for c in clusters.values()]
+    nu0s = [x["nu0"] for c in clusters.values() for x in c if x["nu0"]]
+    vmean = sum(voltages) / len(voltages)
+    if len(voltages) > 1:
+        sd = math.sqrt(sum((x - vmean) ** 2 for x in voltages) / (len(voltages) - 1))
+        sigma_v = sd / math.sqrt(len(voltages))
+    else:
+        sigma_v = 0.0
+    nu0_mean = sum(nu0s) / len(nu0s) if nu0s else 757000.0
+    info = {"V": vmean, "sigma_V": sigma_v, "n_clusters": len(voltages),
+            "n_rows": len(recs), "d_is_dv_MHz_per_V": None, "beam_sys_MHz": 0.0}
+    match = re.match(r"^(3[246]S)-(3[246]S)$", comparison)
+    if match and match.group(1) in SULFUR_MASSES_U and match.group(2) in SULFUR_MASSES_U and vmean:
+        d_is_dv = (nu0_mean / (2.0 * vmean)) * abs(
+            _ion_beta(SULFUR_MASSES_U[match.group(1)], vmean)
+            - _ion_beta(SULFUR_MASSES_U[match.group(2)], vmean)
+        ) * 1000.0  # MHz/V
+        info["d_is_dv_MHz_per_V"] = d_is_dv
+        info["beam_sys_MHz"] = d_is_dv * sigma_v
+    return info
+
+
+def compute_charge_radii(query: dict[str, list[str]]) -> dict:
+    """Charge-radius differences from the accepted library scans (same cuts as the
+    Library analysis tab), folding the beam-energy systematic into the uncertainty."""
+    defaults = CHARGE_RADIUS_DEFAULTS
+    lower_no = int(float(query.get("lower_no", [defaults["lower_no"]])[0] or defaults["lower_no"]))
+    upper_no = int(float(query.get("upper_no", [defaults["upper_no"]])[0] or defaults["upper_no"]))
+    field_col = query.get("field_col", [defaults["field_col"]])[0] or defaults["field_col"]
+    comparisons = [c for c in query.get("comparison", []) if c] or list(CHARGE_RADIUS_COMPARISONS)
+
+    const = transition_constants(lower_no, upper_no, field_col)
+    dK_tot = const["dK_tot_GHz_u"]
+    dF = const["dF_GHz_fm2"]
+    _, base_cuts = inclusion_cuts_from_query(query)
+    rows = read_library_csv(LIBRARY_CSV)
+
+    results = []
+    for comp in comparisons:
+        parts = comp.split("-")
+        entry: dict = {"comparison": comp, "muonic_reference_fm2": MUONIC_REFERENCE_FM2.get(comp)}
+        if len(parts) != 2 or parts[0] not in SULFUR_MASSES_U or parts[1] not in SULFUR_MASSES_U:
+            entry.update({"available": False, "reason": "unknown isotopes"})
+            results.append(entry)
+            continue
+        heavy, light = parts
+        mu = 1.0 / SULFUR_MASSES_U[heavy] - 1.0 / SULFUR_MASSES_U[light]
+        ms_GHz = dK_tot * mu
+        ana = analyze_library_uncertainty(rows, dataclasses.replace(base_cuts, comparison=comp))
+        freq = ana.get("frequentist")
+        entry.update({
+            "mu_u_inv": mu,
+            "mass_shift_MHz": ms_GHz * 1000.0,
+            "n_included_rows": ana.get("n_included_rows", 0),
+            "n_independent_runs": ana.get("n_independent_runs", 0),
+        })
+        if not freq:
+            entry.update({"available": False, "reason": "no accepted scans for this comparison"})
+            results.append(entry)
+            continue
+        be = beam_energy_systematic(comp)
+        beam_sys_MHz = float(be["beam_sys_MHz"]) if be else 0.0
+        row_sys_MHz = float(freq.get("systematic_unc_MHz", 0.0) or 0.0)
+        stat_MHz = float(freq["weighted_scatter_sem_MHz"])
+        sys_MHz = math.sqrt(row_sys_MHz ** 2 + beam_sys_MHz ** 2)
+        total_MHz = math.sqrt(stat_MHz ** 2 + sys_MHz ** 2)
+        IS_MHz = float(freq["weighted_mean_MHz"])
+        fs_MHz = IS_MHz - ms_GHz * 1000.0
+        dF_MHz_per_fm2 = dF * 1000.0
+        dr2 = fs_MHz / dF_MHz_per_fm2 if dF_MHz_per_fm2 else float("nan")
+        scale = abs(dF_MHz_per_fm2) if dF_MHz_per_fm2 else float("nan")
+        entry.update({
+            "available": True,
+            "isotope_shift_MHz": IS_MHz,
+            "isotope_shift_stat_MHz": stat_MHz,
+            "isotope_shift_sys_MHz": sys_MHz,
+            "isotope_shift_beam_sys_MHz": beam_sys_MHz,
+            "isotope_shift_total_MHz": total_MHz,
+            "field_shift_MHz": fs_MHz,
+            "delta_r2_fm2": dr2,
+            "delta_r2_unc_fm2": total_MHz / scale,
+            "delta_r2_stat_fm2": stat_MHz / scale,
+            "delta_r2_sys_fm2": sys_MHz / scale,
+            "energy": be,
+        })
+        results.append(entry)
+
+    return {
+        "constants": {
+            "lower_no": lower_no,
+            "upper_no": upper_no,
+            "lower_term": const["lower"]["Term"],
+            "upper_term": const["upper"]["Term"],
+            "field_col": field_col,
+            "field_label": FIELD_COLUMNS[field_col],
+            "dK_nms_GHz_u": const["dK_nms_GHz_u"],
+            "dK_sms_GHz_u": const["dK_sms_GHz_u"],
+            "dK_tot_GHz_u": dK_tot,
+            "dF_GHz_fm2": dF,
+            "transition_cm1": const["transition_cm1"],
+        },
+        "cuts": {
+            "fit_unc_cut_MHz": base_cuts.fit_unc_cut_MHz,
+            "max_abs_pull": base_cuts.max_abs_pull,
+            "min_points_per_isotope": base_cuts.min_points_per_isotope,
+            "exclude_background": base_cuts.exclude_background,
+            "require_bracket_pass": base_cuts.require_bracket_pass,
+        },
+        "results": results,
+    }
 
 
 EXPORT_COLUMNS = [
@@ -1427,6 +1690,7 @@ def render_page() -> bytes:
   <nav class="tabs">
     <button type="button" class="tab-btn active" data-tab="library">Library analysis</button>
     <button type="button" class="tab-btn" data-tab="energy">Collinear/anti-collinear beam energy correction</button>
+    <button type="button" class="tab-btn" data-tab="charge">Charge radii</button>
   </nav>
   <div id="tab-library" class="tab-panel active">
   <main>
@@ -1661,6 +1925,48 @@ def render_page() -> bytes:
         <div class="meta">Persisted to energy_correction_library.csv</div>
       </div>
       <div id="energy-saved" class="tiny-table"></div>
+    </section>
+  </main>
+  </div>
+  <div id="tab-charge" class="tab-panel">
+  <main>
+    <section class="control">
+      <form id="charge-form">
+        <div class="grid2">
+          <div>
+            <label for="cr-lower">Lower level (No.)</label>
+            <input id="cr-lower" name="lower_no" value="{CHARGE_RADIUS_DEFAULTS['lower_no']}">
+          </div>
+          <div>
+            <label for="cr-upper">Upper level (No.)</label>
+            <input id="cr-upper" name="upper_no" value="{CHARGE_RADIUS_DEFAULTS['upper_no']}">
+          </div>
+        </div>
+        <div class="help">GRASP table indices for the measured transition (defaults 6 = 5S2 -> 59 = 5P2).</div>
+
+        <label for="cr-field">Field-shift factor</label>
+        <select id="cr-field" name="field_col">
+          <option value="F0_GHz_fm2" selected>F0</option>
+          <option value="F0VED0_GHz_fm2">F0VED0 (vacuum-polarization corrected)</option>
+        </select>
+        <div class="help">Atomic constants are read from SI_HFS_IS.txt. Isotope shifts come from the
+        <strong>accepted scans</strong> in the Library analysis tab (same quality cuts), and the correlated
+        beam-energy systematic is folded in from the energy library.</div>
+
+        <div class="actions">
+          <button type="submit">Compute charge radii</button>
+        </div>
+        <div id="charge-status" class="status">Computes delta&lt;r&sup2;&gt; for 34S-32S and 36S-32S from accepted scans.</div>
+      </form>
+    </section>
+    <section>
+      <div class="library-head">
+        <h2>Charge-radii differences</h2>
+        <div class="meta">&delta;&lt;r&sup2;&gt; = (IS &minus; &delta;&nu;<sub>MS</sub>) / &delta;F</div>
+      </div>
+      <div id="charge-cards" class="summary-cards"></div>
+      <div id="charge-table" class="tiny-table" style="margin-top:12px"></div>
+      <div id="charge-detail" class="meta" style="margin-top:10px"></div>
     </section>
   </main>
   </div>
@@ -1938,7 +2244,77 @@ def render_page() -> bytes:
         const tab = btn.getAttribute('data-tab');
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+        if (tab === 'charge' && !chargeCards.dataset.loaded) {{
+          chargeCards.dataset.loaded = '1';
+          chargeForm.requestSubmit();
+        }}
       }});
+    }});
+
+    // Charge radii tab
+    const chargeForm = document.getElementById('charge-form');
+    const chargeStatus = document.getElementById('charge-status');
+    const chargeCards = document.getElementById('charge-cards');
+    const chargeTable = document.getElementById('charge-table');
+    const chargeDetail = document.getElementById('charge-detail');
+
+    function renderCharge(data) {{
+      const cards = [];
+      (data.results || []).forEach(r => {{
+        if (!r.available) {{
+          cards.push(`<div class="summary-card"><strong>n/a</strong><span>${{escapeHtml(r.comparison)}}: ${{escapeHtml(r.reason || 'no data')}}</span></div>`);
+          return;
+        }}
+        const ref = r.muonic_reference_fm2 != null ? ` (muonic ~${{fmt(r.muonic_reference_fm2, 2)}})` : '';
+        cards.push(`<div class="summary-card"><strong>${{fmt(r.delta_r2_fm2, 3)}} +/- ${{fmt(r.delta_r2_unc_fm2, 3)}} fm&sup2;</strong><span>&delta;&lt;r&sup2;&gt; ${{escapeHtml(r.comparison)}}${{ref}}</span></div>`);
+      }});
+      chargeCards.innerHTML = cards.join('') || '<p class="empty">No results.</p>';
+
+      const bodies = (data.results || []).filter(r => r.available).map(r =>
+        `<tr><td>${{escapeHtml(r.comparison)}}</td>`
+        + `<td>${{fmt(r.isotope_shift_MHz, 1)}}</td>`
+        + `<td>${{fmt(r.isotope_shift_stat_MHz, 2)}} / ${{fmt(r.isotope_shift_beam_sys_MHz, 2)}} / ${{fmt(r.isotope_shift_total_MHz, 2)}}</td>`
+        + `<td>${{fmt(r.mass_shift_MHz, 1)}}</td>`
+        + `<td>${{fmt(r.field_shift_MHz, 1)}}</td>`
+        + `<td><strong>${{fmt(r.delta_r2_fm2, 3)}} +/- ${{fmt(r.delta_r2_unc_fm2, 3)}}</strong></td>`
+        + `<td>${{fmt(r.delta_r2_stat_fm2, 3)}} / ${{fmt(r.delta_r2_sys_fm2, 3)}}</td>`
+        + `<td>${{r.n_included_rows}} &rarr; ${{r.n_independent_runs}}</td></tr>`).join('');
+      chargeTable.innerHTML = bodies
+        ? '<table><thead><tr><th>Pair</th><th>IS MHz</th><th>IS stat/beamE/total MHz</th><th>MS MHz</th><th>FS MHz</th><th>&delta;&lt;r&sup2;&gt; fm&sup2;</th><th>stat/sys fm&sup2;</th><th>rows&rarr;runs</th></tr></thead><tbody>' + bodies + '</tbody></table>'
+        : '';
+
+      const c = data.constants || {{}};
+      const first = (data.results || []).find(r => r.available && r.energy);
+      let detail = `Transition ${{escapeHtml(c.lower_term || '')}} (No.${{c.lower_no}}) → ${{escapeHtml(c.upper_term || '')}} (No.${{c.upper_no}}) at ${{fmt(c.transition_cm1, 1)}} cm⁻¹.  `
+        + `ΔK_total = ${{fmt(c.dK_tot_GHz_u, 3)}} GHz·u,  ΔF (${{escapeHtml(c.field_label)}}) = ${{expo(c.dF_GHz_fm2, 4)}} GHz/fm².`;
+      if (first && first.energy) {{
+        const e = first.energy;
+        detail += `  Beam energy: ${{fmt(e.V, 1)}} +/- ${{fmt(e.sigma_V, 1)}} V (${{e.n_clusters}} independent of ${{e.n_rows}} energy rows).`;
+      }}
+      detail += '  Theory uncertainties on ΔK and ΔF are not included.';
+      chargeDetail.textContent = detail;
+    }}
+
+    chargeForm.addEventListener('submit', async (event) => {{
+      event.preventDefault();
+      chargeStatus.className = 'status'; chargeStatus.textContent = 'Computing...';
+      const params = new URLSearchParams(new FormData(chargeForm)).toString();
+      try {{
+        const resp = await fetch('/api/charge_radii?' + params);
+        const data = await resp.json();
+        if (!resp.ok) throw Object.assign(new Error(data.error || 'request failed'), {{detail: data.detail}});
+        renderCharge(data);
+        chargeStatus.className = 'status ok'; chargeStatus.textContent = 'Done.';
+      }} catch (error) {{
+        chargeCards.innerHTML = ''; chargeTable.innerHTML = ''; chargeDetail.textContent = '';
+        chargeStatus.className = 'status err'; chargeStatus.textContent = error.message;
+        if (error.detail) {{
+          const det = document.createElement('details');
+          const sum = document.createElement('summary'); sum.textContent = 'Show error details';
+          const pre = document.createElement('pre'); pre.textContent = error.detail; pre.className = 'error-detail';
+          det.appendChild(sum); det.appendChild(pre); chargeStatus.appendChild(det);
+        }}
+      }}
     }});
 
     // Beam energy correction tab
@@ -2096,6 +2472,13 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/energy_library":
             self.send_json({"rows": read_energy_library()[::-1]})
+            return
+        if parsed.path == "/api/charge_radii":
+            try:
+                self.send_json(compute_charge_radii(parse_qs(parsed.query)))
+            except Exception as exc:
+                traceback.print_exc()
+                self.send_json({"error": str(exc), "detail": traceback.format_exc()}, status=400)
             return
         if parsed.path == "/api/predict_anticollinear":
             try:
