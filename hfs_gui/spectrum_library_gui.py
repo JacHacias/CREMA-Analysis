@@ -503,6 +503,25 @@ def compute_charge_radii(query: dict[str, list[str]]) -> dict:
             "delta_r2_sys_fm2": sys_MHz / scale,
             "energy": be,
         })
+        # Bayesian variant: same field/mass factors and beam-energy systematic, but the
+        # IS comes from the random-effects posterior of the mean (mu_sd already folds in
+        # between-run scatter). For a single run the posterior is wide -- expected.
+        bayes = ana.get("bayesian") or {}
+        if bayes.get("available"):
+            b_is = float(bayes["mu_mean_MHz"])
+            b_stat = float(bayes.get("mu_sd_MHz", 0.0) or 0.0)
+            b_total = math.sqrt(b_stat ** 2 + sys_MHz ** 2)
+            b_fs = b_is - ms_GHz * 1000.0
+            entry.update({
+                "bayes_available": True,
+                "isotope_shift_bayes_MHz": b_is,
+                "isotope_shift_bayes_stat_MHz": b_stat,
+                "isotope_shift_bayes_total_MHz": b_total,
+                "delta_r2_bayes_fm2": (b_fs / dF_MHz_per_fm2) if dF_MHz_per_fm2 else float("nan"),
+                "delta_r2_bayes_unc_fm2": b_total / scale,
+            })
+        else:
+            entry["bayes_available"] = False
         results.append(entry)
 
     return {
@@ -2280,21 +2299,30 @@ def render_page() -> bytes:
           return;
         }}
         const ref = r.muonic_reference_fm2 != null ? ` (muonic ~${{fmt(r.muonic_reference_fm2, 2)}})` : '';
-        cards.push(`<div class="summary-card"><strong>${{fmt(r.delta_r2_fm2, 3)}} +/- ${{fmt(r.delta_r2_unc_fm2, 3)}} fm&sup2;</strong><span>&delta;&lt;r&sup2;&gt; ${{escapeHtml(r.comparison)}}${{ref}}</span></div>`);
+        const bayesLine = r.bayes_available
+          ? `Bayesian: ${{fmt(r.delta_r2_bayes_fm2, 3)}} +/- ${{fmt(r.delta_r2_bayes_unc_fm2, 3)}}`
+          : 'Bayesian: n/a';
+        cards.push(`<div class="summary-card"><strong>${{fmt(r.delta_r2_fm2, 3)}} +/- ${{fmt(r.delta_r2_unc_fm2, 3)}} fm&sup2;</strong>`
+          + `<span>&delta;&lt;r&sup2;&gt; ${{escapeHtml(r.comparison)}}${{ref}}<br>frequentist &middot; ${{bayesLine}}</span></div>`);
       }});
       chargeCards.innerHTML = cards.join('') || '<p class="empty">No results.</p>';
 
-      const bodies = (data.results || []).filter(r => r.available).map(r =>
-        `<tr><td>${{escapeHtml(r.comparison)}}</td>`
-        + `<td>${{fmt(r.isotope_shift_MHz, 1)}}</td>`
-        + `<td>${{fmt(r.isotope_shift_stat_MHz, 2)}} / ${{fmt(r.isotope_shift_beam_sys_MHz, 2)}} / ${{fmt(r.isotope_shift_total_MHz, 2)}}</td>`
-        + `<td>${{fmt(r.mass_shift_MHz, 1)}}</td>`
-        + `<td>${{fmt(r.field_shift_MHz, 1)}}</td>`
-        + `<td><strong>${{fmt(r.delta_r2_fm2, 3)}} +/- ${{fmt(r.delta_r2_unc_fm2, 3)}}</strong></td>`
-        + `<td>${{fmt(r.delta_r2_stat_fm2, 3)}} / ${{fmt(r.delta_r2_sys_fm2, 3)}}</td>`
-        + `<td>${{r.n_included_rows}} &rarr; ${{r.n_independent_runs}}</td></tr>`).join('');
+      const bodies = (data.results || []).filter(r => r.available).map(r => {{
+        const isBayes = r.bayes_available ? fmt(r.isotope_shift_bayes_MHz, 1) : 'n/a';
+        const drBayes = r.bayes_available
+          ? `${{fmt(r.delta_r2_bayes_fm2, 3)}} +/- ${{fmt(r.delta_r2_bayes_unc_fm2, 3)}}`
+          : 'n/a';
+        return `<tr><td>${{escapeHtml(r.comparison)}}</td>`
+          + `<td>${{fmt(r.isotope_shift_MHz, 1)}} / ${{isBayes}}</td>`
+          + `<td>${{fmt(r.isotope_shift_stat_MHz, 2)}} / ${{fmt(r.isotope_shift_beam_sys_MHz, 2)}} / ${{fmt(r.isotope_shift_total_MHz, 2)}}</td>`
+          + `<td>${{fmt(r.mass_shift_MHz, 1)}}</td>`
+          + `<td>${{fmt(r.field_shift_MHz, 1)}}</td>`
+          + `<td><strong>${{fmt(r.delta_r2_fm2, 3)}} +/- ${{fmt(r.delta_r2_unc_fm2, 3)}}</strong></td>`
+          + `<td>${{drBayes}}</td>`
+          + `<td>${{r.n_included_rows}} &rarr; ${{r.n_independent_runs}}</td></tr>`;
+      }}).join('');
       chargeTable.innerHTML = bodies
-        ? '<table><thead><tr><th>Pair</th><th>IS MHz</th><th>IS stat/beamE/total MHz</th><th>MS MHz</th><th>FS MHz</th><th>&delta;&lt;r&sup2;&gt; fm&sup2;</th><th>stat/sys fm&sup2;</th><th>rows&rarr;runs</th></tr></thead><tbody>' + bodies + '</tbody></table>'
+        ? '<table><thead><tr><th>Pair</th><th>IS freq/Bayes MHz</th><th>IS stat/beamE/total MHz</th><th>MS MHz</th><th>FS MHz</th><th>&delta;&lt;r&sup2;&gt; freq fm&sup2;</th><th>&delta;&lt;r&sup2;&gt; Bayes fm&sup2;</th><th>rows&rarr;runs</th></tr></thead><tbody>' + bodies + '</tbody></table>'
         : '';
 
       const c = data.constants || {{}};
@@ -2305,7 +2333,7 @@ def render_page() -> bytes:
         const e = first.energy;
         detail += `  Beam energy: ${{fmt(e.V, 1)}} +/- ${{fmt(e.sigma_V, 1)}} V (${{e.n_clusters}} independent of ${{e.n_rows}} energy rows).`;
       }}
-      detail += '  Theory uncertainties on ΔK and ΔF are not included.';
+      detail += '  Frequentist IS = weighted mean + Cochran scatter SEM; Bayesian IS = random-effects posterior of the mean (wide for a single run). Both add the beam-energy systematic in quadrature. Theory uncertainties on ΔK and ΔF are not included.';
       chargeDetail.textContent = detail;
     }}
 
