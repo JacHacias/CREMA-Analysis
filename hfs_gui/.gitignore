@@ -1,0 +1,15 @@
+# Local Claude Code settings (machine-specific)
+.claude/
+
+# Debug scratch artifacts from working out the launch mechanism
+ps_job_test.txt
+ps_startprocess_test.txt
+
+# Ad-hoc library snapshots taken during analysis. The live libraries
+# (isotope_shift_library.*, energy_correction_library.*) are tracked; these
+# manual backups are redundant now that git history is the durable record.
+data_library/*.pre_offset
+data_library/*.prefit
+data_library/*_before_*
+data_library/*_reverted_*
+data_library/*_pre_hene_*

@@ -1,0 +1,40 @@
+{
+  "wn_col": "wavemeter_wn1",
+  "use_hene_calibration": true,
+  "hene_col": "wavemeter_wn4",
+  "hene_reference_wn": null,
+  "hene_reference_wavelength_nm": 632.992,
+  "hene_reference_wavelength_medium": "vacuum",
+  "hene_wavenumber_medium": "vacuum",
+  "frequency_multiplier": 2.0,
+  "bin_width_MHz": 20.0,
+  "tof_gate_us": null,
+  "per_isotope_tof_gates": {
+    "32S": [4.25, 5.5],
+    "34S": [5.1, 5.8],
+    "36S": [5.8, 6.0]
+  },
+  "tof_col": "tof",
+  "beam_voltage_V": 10000.0,
+  "beam_voltage_unc_V": 0.0,
+  "voltage_col": "voltage",
+  "voltage_multiplier": 5962.49,
+  "use_voltage_column": true,
+  "charge_e": 1,
+  "geometry": "collinear",
+  "neutralization": "none",
+  "sodium_collision_branch": "forward",
+  "show_tof_gate_plots": false,
+  "auto_remove_bad_scans": true,
+  "bad_scan_min_coverage_fraction": 0.6,
+  "bad_scan_min_points_fraction": 0.35,
+  "bad_scan_max_spectrum_peak_z": 6.0,
+  "use_bracketed_32S_reference": true,
+  "bracket_max_shift_disagreement_MHz": 50.0,
+  "validate_isotope_wavenumber": true,
+  "isotope_wavenumber_windows": {
+    "32S": [12625.16, 12625.22],
+    "34S": [12624.86, 12624.93],
+    "36S": [12624.48, 12624.72]
+  }
+}
