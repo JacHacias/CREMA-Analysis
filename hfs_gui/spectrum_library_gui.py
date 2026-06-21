@@ -36,6 +36,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+# This GUI lives under hfs_gui/ but the shared analysis modules remain at the repo
+# root (they are also imported by root-level scripts). Make the repo root importable
+# regardless of the working directory the launcher uses.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import isotope_shift_analysis as isa
 from quick_isotope_shift import (
     DEFAULT_ANALYSIS_OPTIONS,
@@ -300,11 +307,18 @@ def _find_si_hfs_text() -> tuple[str, str]:
     """Locate and read the theorist GRASP constants table (SI_HFS_IS.txt), preferring
     the zip but falling back to a loose .txt, searched relative to the project root."""
     member = "SI_HFS_IS/SI_HFS_IS.txt"
-    for zip_path in [ROOT / "SI_HFS_IS.zip", *sorted(ROOT.glob("**/SI_HFS_IS.zip"))]:
+    # Search this script's dir and the repo root (the GUI lives under hfs_gui/, the zip
+    # is typically at the repo root), then any nested copy.
+    search_bases = [ROOT, ROOT.parent]
+    zip_candidates = [base / "SI_HFS_IS.zip" for base in search_bases]
+    zip_candidates += sorted(ROOT.glob("**/SI_HFS_IS.zip")) + sorted(ROOT.parent.glob("**/SI_HFS_IS.zip"))
+    for zip_path in zip_candidates:
         if zip_path.exists():
             with zipfile.ZipFile(zip_path) as zf:
                 return str(zip_path), zf.read(member).decode("utf-8", "ignore")
-    for txt_path in [ROOT / "SI_HFS_IS.txt", *sorted(ROOT.glob("**/SI_HFS_IS.txt"))]:
+    txt_candidates = [base / "SI_HFS_IS.txt" for base in search_bases]
+    txt_candidates += sorted(ROOT.glob("**/SI_HFS_IS.txt")) + sorted(ROOT.parent.glob("**/SI_HFS_IS.txt"))
+    for txt_path in txt_candidates:
         if txt_path.exists():
             return str(txt_path), txt_path.read_text(encoding="utf-8", errors="ignore")
     raise FileNotFoundError(

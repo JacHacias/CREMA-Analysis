@@ -20,10 +20,12 @@ Install the Python packages used by the scripts:
 ```python
 import numpy as np
 import matplotlib.pyplot as plt
-import satlas2
+import scipy
 ```
 
-`satlas2` provides the Voigt fitting used in the isotope-shift scripts. Install it with `pip install satlas2`.
+If `satlas2` is installed, the isotope-shift scripts use it for Voigt fitting.
+If it is not installed, they fall back to SciPy's `curve_fit`, which is useful
+for quick analysis on this machine without extra setup.
 
 The Rigol DP900 control UI has no required packages for LAN socket or simulator mode. From the repo root, run:
 
@@ -83,6 +85,116 @@ out = plot_three_isotopes_fit(
     geometry="collinear",
     neutralization="none",
 )
+```
+
+## Quick Day-End Library Workflow
+
+Use `quick_isotope_shift.py` when you have just taken files and want a fast
+centroid/isotope-shift summary saved to a growing data library. The script
+infers isotope labels from filenames such as `32S_3-27-26.csv`,
+`34S_3-27-26.csv`, and `36S_3-27-26.csv`.
+
+## Spectrum Library GUI
+
+For the lowest-friction end-of-day workflow, launch the local GUI:
+
+```powershell
+.\.venv\Scripts\python.exe .\hfs_gui\spectrum_library_gui.py
+```
+
+You can also double-click `hfs_gui\launch_spectrum_library_gui.bat`, which frees
+port 8766 (stopping any running instance) and then starts the GUI.
+
+Then open `http://127.0.0.1:8766` if the browser does not open
+automatically. Paste filenames or full paths into the file box, enter the
+collection date/time, and click `Analyze and Add`. The GUI writes the same
+library files as the command-line workflow and shows recent fit plots. It also
+regenerates library-wide stability plots from the saved rows:
+
+- total `32S` / `34S` centroid stability
+- `34S-32S` isotope-shift stability
+- `36S-32S` isotope-shift stability when `36S` rows exist
+
+The local library has been seeded from the existing sulfur files in
+`..\S data for analysis`, including the March 23, March 24, and March 27
+main and `_back` background spectra. Use `Rebuild From Folder` in the GUI to
+replace the library from that folder again. The rebuild form has an
+`Include _back background files` checkbox so you can choose whether those scans
+are included.
+
+By default the GUI and command-line workflow automatically remove bad scan
+passes before fitting. A bad scan pass is inferred from resets in
+`scan_bin_index` and rejected if it has poor bin coverage, too few events,
+invalid wavemeter data, a collapsed wavemeter range, or an extreme
+`spectrum_peak` outlier. Each library row records `scans_removed`,
+`points_removed`, and a JSON `bad_scan_filter` audit trail.
+
+If a file name does not contain the isotope label, such as raw DAQ names like
+`scan_20260506_140648.csv`, enter labels in the `Isotope labels` box in the
+same order as the pasted files, for example `32S,34S`.
+
+You can paste multiple consecutive files for the same isotope. The workflow
+bundles all files with the same isotope label before bad-scan filtering, ToF
+gating, and fitting. For raw DAQ filenames, repeat labels in the same order as
+the files, for example `32S,32S,34S,34S`.
+
+Raw DAQ filenames are also checked against the expected wavemeter region for
+this sulfur transition. If a file labeled `34S` has a median wavemeter value in
+the `32S` region, the GUI refuses the fit and reports the suspicious file
+instead of saving a bad library row.
+
+The GUI has separate `32S`, `34S`, and `36S` ToF gate fields. Fill the isotope
+gates that apply to the files being analyzed; the workflow pre-gates each
+isotope independently before fitting.
+
+The spectrum library and GUI tables report centroids, isotope shifts, and
+uncertainties in MHz. The fitting functions still keep GHz internally and
+convert at the library/plot display boundary.
+
+`Rebuild From Folder` leaves `36S` unchecked by default, so the March 27 `36S`
+scan is not included unless you explicitly enable `Include 36S files when
+rebuilding`.
+
+Two-isotope run:
+
+```powershell
+python .\quick_isotope_shift.py `
+  --data-dir "..\S data for analysis" `
+  --collection-date 2026-03-27 `
+  --collection-time "afternoon" `
+  --run-label "sulfur_2026-03-27" `
+  --transition "12625 cm-1 line" `
+  32S_3-27-26.csv 34S_3-27-26.csv
+```
+
+Three-isotope run:
+
+```powershell
+python .\quick_isotope_shift.py `
+  --data-dir "..\S data for analysis" `
+  --collection-date 2026-03-27 `
+  --collection-time "afternoon" `
+  --run-label "sulfur_2026-03-27" `
+  32S_3-27-26.csv 34S_3-27-26.csv 36S_3-27-26.csv
+```
+
+The quick workflow writes:
+
+- `analysis_plots/`: PNG fit plots for the run.
+- `data_library/isotope_shift_library.csv`: spreadsheet-friendly summary rows.
+- `data_library/isotope_shift_library.jsonl`: one JSON record per result row for
+  later scripting/publication organization.
+
+Analysis defaults live in `analysis_defaults.json`. You can either edit that
+file or override settings from the command line, for example:
+
+```powershell
+python .\quick_isotope_shift.py `
+  --config .\analysis_defaults.json `
+  --data-dir "..\S data for analysis" `
+  --tof-gate-us 4.25,5.5 `
+  --beam-voltage-unc-V 1.2 `
+  32S_3-27-26.csv 34S_3-27-26.csv
 ```
 
 ## Notes

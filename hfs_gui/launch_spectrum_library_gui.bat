@@ -8,7 +8,7 @@ echo Stopping any existing GUI listening on port 8766...
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr "127.0.0.1:8766" ^| findstr "LISTENING"') do taskkill /F /PID %%a >nul 2>&1
 
 echo Starting spectrum library GUI (http://127.0.0.1:8766) ...
-".venv\Scripts\python.exe" "spectrum_library_gui.py"
+"..\.venv\Scripts\python.exe" "spectrum_library_gui.py"
 
 REM Keep the window open if the server exits so any error stays readable.
 echo.
