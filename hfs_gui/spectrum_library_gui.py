@@ -383,27 +383,20 @@ def transition_constants(lower_no: int, upper_no: int, field_col: str) -> dict:
     }
 
 
-def beam_energy_systematic(comparison: str) -> dict | None:
-    """Correlated beam-energy systematic on the isotope shift, d(IS)/dV * sigma_V,
-    from the collinear/anti-collinear energy library. Energy rows that share a scan
-    file are not independent (common-mode centroid error), so they are unioned into
-    one cluster and the scatter SEM is taken over independent clusters."""
-    rows = read_energy_library()
-    recs = []
+def _cluster_energy_rows(rows: list[dict]) -> list[list[dict]]:
+    """Group energy-library rows into clusters that (transitively) share a scan file.
+    Rows sharing a scan are not independent measurements (common-mode centroid error),
+    so callers should treat each cluster as one independent measurement."""
+    indexed = []
     for row in rows:
-        v = _float_or_none(row.get("voltage_inferred_V"))
-        if v is None:
-            continue
         files = set()
         for col in ("collinear_files", "anticollinear_files"):
             for f in str(row.get(col, "")).split(";"):
                 f = f.strip()
                 if f:
                     files.add(f)
-        recs.append({"V": v, "nu0": _float_or_none(row.get("rest_frequency_GHz")), "files": files})
-    if not recs:
-        return None
-    parent = list(range(len(recs)))
+        indexed.append((row, files))
+    parent = list(range(len(indexed)))
 
     def find(a: int) -> int:
         while parent[a] != a:
@@ -411,24 +404,88 @@ def beam_energy_systematic(comparison: str) -> dict | None:
             a = parent[a]
         return a
 
-    for i in range(len(recs)):
-        for j in range(i + 1, len(recs)):
-            if recs[i]["files"] & recs[j]["files"]:
+    for i in range(len(indexed)):
+        for j in range(i + 1, len(indexed)):
+            if indexed[i][1] & indexed[j][1]:
                 parent[find(i)] = find(j)
-    clusters: dict[int, list] = {}
-    for i, rec in enumerate(recs):
-        clusters.setdefault(find(i), []).append(rec)
-    voltages = [sum(x["V"] for x in c) / len(c) for c in clusters.values()]
-    nu0s = [x["nu0"] for c in clusters.values() for x in c if x["nu0"]]
-    vmean = sum(voltages) / len(voltages)
-    if len(voltages) > 1:
-        sd = math.sqrt(sum((x - vmean) ** 2 for x in voltages) / (len(voltages) - 1))
-        sigma_v = sd / math.sqrt(len(voltages))
+    groups: dict[int, list] = {}
+    for i, (row, _files) in enumerate(indexed):
+        groups.setdefault(find(i), []).append(row)
+    return list(groups.values())
+
+
+def _mean_scatter_sem(values: list[float | None]) -> tuple[float | None, float | None, int]:
+    """Equal-weight mean and scatter SEM (sample std / sqrt n) over the finite values."""
+    xs = [float(v) for v in values if v is not None and math.isfinite(float(v))]
+    if not xs:
+        return None, None, 0
+    mean = sum(xs) / len(xs)
+    if len(xs) > 1:
+        sd = math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))
+        sem = sd / math.sqrt(len(xs))
     else:
-        sigma_v = 0.0
+        sem = 0.0
+    return mean, sem, len(xs)
+
+
+def _cluster_mean(cluster: list[dict], key: str) -> float | None:
+    vals = [_float_or_none(row.get(key)) for row in cluster]
+    vals = [v for v in vals if v is not None]
+    return (sum(vals) / len(vals)) if vals else None
+
+
+def compute_global_energy_average() -> dict:
+    """Single overall beam-energy correction from ALL saved scans. Rows that share a
+    scan file are collapsed to one independent measurement first (so correlated pairs
+    are not double-counted), then each quantity is the equal-weight mean across the
+    independent measurements with a scatter SEM."""
+    rows = read_energy_library()
+    n_rows = sum(1 for r in rows if _float_or_none(r.get("voltage_inferred_V")) is not None)
+    clusters = [c for c in _cluster_energy_rows(rows)
+                if _cluster_mean(c, "voltage_inferred_V") is not None]
+    if not clusters:
+        return {"available": False, "n_rows": n_rows, "n_clusters": 0}
+    v_mean, v_sem, n_clusters = _mean_scatter_sem([_cluster_mean(c, "voltage_inferred_V") for c in clusters])
+    b_mean, b_sem, _ = _mean_scatter_sem([_cluster_mean(c, "beta") for c in clusters])
+    nu_mean, nu_sem, _ = _mean_scatter_sem([_cluster_mean(c, "rest_frequency_GHz") for c in clusters])
+    ke_mean, ke_sem, _ = _mean_scatter_sem([_cluster_mean(c, "ke_ion_eV") for c in clusters])
+    dv_mean, dv_sem, _ = _mean_scatter_sem([_cluster_mean(c, "delta_V") for c in clusters])
+    vs_mean, _vs_sem, _ = _mean_scatter_sem([_cluster_mean(c, "voltage_set_V") for c in clusters])
+    return {
+        "available": True,
+        "n_rows": n_rows,
+        "n_clusters": n_clusters,
+        "voltage_global_V": v_mean,
+        "voltage_global_unc_V": v_sem,
+        "beta_global": b_mean,
+        "beta_global_unc": b_sem,
+        "rest_frequency_GHz": nu_mean,
+        "rest_frequency_unc_MHz": (nu_sem * 1000.0) if nu_sem is not None else None,
+        "ke_ion_eV": ke_mean,
+        "ke_ion_unc_eV": ke_sem,
+        "voltage_set_V": vs_mean,
+        "delta_V": dv_mean,
+        "delta_V_unc_V": dv_sem,
+    }
+
+
+def beam_energy_systematic(comparison: str) -> dict | None:
+    """Correlated beam-energy systematic on the isotope shift, d(IS)/dV * sigma_V,
+    from the collinear/anti-collinear energy library, with shared-scan rows collapsed
+    so correlated pairs do not shrink the scatter SEM."""
+    rows = read_energy_library()
+    clusters = [c for c in _cluster_energy_rows(rows)
+                if _cluster_mean(c, "voltage_inferred_V") is not None]
+    if not clusters:
+        return None
+    voltages = [_cluster_mean(c, "voltage_inferred_V") for c in clusters]
+    nu0s = [_float_or_none(r.get("rest_frequency_GHz")) for c in clusters for r in c]
+    nu0s = [n for n in nu0s if n is not None]
+    n_rows = sum(1 for r in rows if _float_or_none(r.get("voltage_inferred_V")) is not None)
+    vmean, sigma_v, n_clusters = _mean_scatter_sem(voltages)
     nu0_mean = sum(nu0s) / len(nu0s) if nu0s else 757000.0
-    info = {"V": vmean, "sigma_V": sigma_v, "n_clusters": len(voltages),
-            "n_rows": len(recs), "d_is_dv_MHz_per_V": None, "beam_sys_MHz": 0.0}
+    info = {"V": vmean, "sigma_V": sigma_v, "n_clusters": n_clusters,
+            "n_rows": n_rows, "d_is_dv_MHz_per_V": None, "beam_sys_MHz": 0.0}
     match = re.match(r"^(3[246]S)-(3[246]S)$", comparison)
     if match and match.group(1) in SULFUR_MASSES_U and match.group(2) in SULFUR_MASSES_U and vmean:
         d_is_dv = (nu0_mean / (2.0 * vmean)) * abs(
@@ -1942,6 +1999,13 @@ def render_page() -> bytes:
     </section>
     <section>
       <div class="library-head">
+        <h2>Overall beam energy correction</h2>
+        <div class="meta">Combined over all saved scans (shared scans collapsed)</div>
+      </div>
+      <div id="energy-global" class="summary-cards"><p class="empty">Loading...</p></div>
+      <div id="energy-global-detail" class="meta" style="margin:6px 0 20px"></div>
+
+      <div class="library-head">
         <h2>Collinear/anti-collinear beam energy correction</h2>
         <div class="meta">&nu;&#8320; = &radic;(&nu;_collinear &times; &nu;_anti), energy-independent</div>
       </div>
@@ -2281,6 +2345,7 @@ def render_page() -> bytes:
           chargeCards.dataset.loaded = '1';
           chargeForm.requestSubmit();
         }}
+        if (tab === 'energy') {{ loadEnergyGlobal(); }}
       }});
     }});
 
@@ -2456,6 +2521,28 @@ def render_page() -> bytes:
       try {{ const resp = await fetch('/api/energy_library'); const d = await resp.json(); renderEnergySaved(d.rows || []); }} catch (error) {{}}
     }}
 
+    function renderEnergyGlobal(d) {{
+      const box = document.getElementById('energy-global');
+      const det = document.getElementById('energy-global-detail');
+      if (!d || !d.available) {{
+        box.innerHTML = '<p class="empty">No saved energy measurements yet. Compute and save a collinear/anti-collinear pair below.</p>';
+        det.textContent = '';
+        return;
+      }}
+      const cards = [];
+      cards.push(eCard(`${{fmt(d.voltage_global_V, 1)}} +/- ${{fmt(d.voltage_global_unc_V, 1)}} V`, `overall beam voltage (${{d.n_clusters}} indep of ${{d.n_rows}} scans)`));
+      cards.push(eCard(expo(d.beta_global, 3), `overall beta +/- ${{expo(d.beta_global_unc, 1)}}`));
+      cards.push(eCard(`${{fmt(d.rest_frequency_GHz, 4)}} GHz`, `mean rest freq +/- ${{fmt(d.rest_frequency_unc_MHz, 2)}} MHz`));
+      cards.push(eCard(d.ke_ion_eV != null ? `${{fmt(d.ke_ion_eV, 1)}} eV` : 'n/a', `mean ion-beam KE +/- ${{fmt(d.ke_ion_unc_eV, 1)}} eV`));
+      cards.push(eCard(d.delta_V != null ? `${{fmt(d.delta_V, 1)}} +/- ${{fmt(d.delta_V_unc_V, 1)}} V` : 'n/a', `inferred - set HV (set ${{fmt(d.voltage_set_V, 1)}} V)`));
+      box.innerHTML = cards.join('');
+      det.textContent = `Equal-weight mean over ${{d.n_clusters}} independent measurement(s); scans sharing a file are collapsed so correlated pairs are not double-counted. Uncertainty is the scatter SEM across independent measurements. This is the correction the Charge radii tab folds into the isotope-shift uncertainty.`;
+    }}
+
+    async function loadEnergyGlobal() {{
+      try {{ const resp = await fetch('/api/energy_global'); renderEnergyGlobal(await resp.json()); }} catch (error) {{}}
+    }}
+
     document.getElementById('energy-save').addEventListener('click', async event => {{
       const btn = event.currentTarget;
       const payload = Object.fromEntries(new FormData(energyForm).entries());
@@ -2467,11 +2554,13 @@ def render_page() -> bytes:
         const data = await withBusy(btn, () => postJson('/api/energy_save', payload));
         renderEnergy(data);
         renderEnergySaved(data.energy_library || []);
+        loadEnergyGlobal();
         ss.textContent = `Saved. ${{data.saved_count}} measurement(s) in the library.`;
       }} catch (error) {{ ss.textContent = error.message; }}
     }});
 
     loadEnergySaved();
+    loadEnergyGlobal();
     refreshLibrary().then(() => setStatus('Library loaded.', 'ok')).catch(error => setStatus(error.message, 'err', error.detail));
   </script>
 </body>
@@ -2514,6 +2603,13 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/energy_library":
             self.send_json({"rows": read_energy_library()[::-1]})
+            return
+        if parsed.path == "/api/energy_global":
+            try:
+                self.send_json(compute_global_energy_average())
+            except Exception as exc:
+                traceback.print_exc()
+                self.send_json({"error": str(exc), "detail": traceback.format_exc()}, status=400)
             return
         if parsed.path == "/api/charge_radii":
             try:
