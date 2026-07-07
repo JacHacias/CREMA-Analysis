@@ -695,53 +695,48 @@ def _fit_lab_centroid(paths: list[Path], label: str, options: dict) -> dict:
     }
 
 
-def _plot_energy_fits(label: str, col: dict, anti: dict, nu0_GHz: float, path: Path) -> None:
+def _plot_energy_fits(label: str, col: dict, anti: dict, nu0_GHz: float, beta: float, path: Path) -> None:
     ENERGY_PLOT_DIR.mkdir(parents=True, exist_ok=True)
-    # Both peaks share one frequency axis (detuning from the rest frequency nu0), at
-    # their true separated positions. They are ~1 THz apart with ~1 GHz-wide peaks, so
-    # a broken axis keeps the real separation visible while staying zoomed enough to
-    # read each lineshape: lower-frequency scan on the left, higher on the right.
-    sep_GHz = col["center_GHz"] - anti["center_GHz"]
-    segments = sorted(
-        [("collinear", col, "#0b7285"), ("anti-collinear", anti, "#9a5a00")],
-        key=lambda item: item[1]["center_GHz"],
-    )
+    # Rest-frame view: each scan is Doppler-transformed into the ATOM's rest frame by the
+    # relativistic factor nu0/center = gamma*(1 -/+ beta) (which one is set automatically
+    # by the scan's own centroid, so it is robust to a swapped collinear/anti input).
+    # Both geometries must then collapse onto nu0 (detuning 0). If they do not overlap in
+    # position AND lineshape, the beam energy / Doppler model is off -- that is the check.
+    sep_GHz = abs(col["center_GHz"] - anti["center_GHz"])
+    xs_all = []
     with PLOT_LOCK:
-        fig, (ax_lo, ax_hi) = plt.subplots(
-            1, 2, sharey=True, figsize=(12.0, 5.0), gridspec_kw={"wspace": 0.06}
-        )
-        for ax, (geom, fit, color) in zip((ax_lo, ax_hi), segments):
-            x = np.asarray(fit["centers_GHz"], dtype=float) - nu0_GHz
+        fig, ax = plt.subplots(figsize=(9.5, 5.2))
+        for geom, fit, color in (("collinear", col, "#0b7285"), ("anti-collinear", anti, "#9a5a00")):
+            factor = nu0_GHz / fit["center_GHz"]  # -> atom rest frame; maps this centroid onto nu0
+            centers_rest_MHz = (np.asarray(fit["centers_GHz"], dtype=float) * factor - nu0_GHz) * 1000.0
             ax.step(
-                x, fit["counts"], where="mid", color=color, alpha=0.85,
-                label=f"{geom}\n{fit['center_GHz']:.4f} GHz (n={fit['n_points']})",
+                centers_rest_MHz, fit["counts"], where="mid", color=color, alpha=0.85,
+                label=f"{geom}: {fit['center_GHz']:.4f} GHz lab (n={fit['n_points']})",
             )
+            positive = np.asarray(fit["counts"]) > 0
+            if positive.any():
+                xs_all.append(centers_rest_MHz[positive])
             if fit["x_fit_GHz"] is not None and np.size(fit["x_fit_GHz"]):
-                xf = np.asarray(fit["x_fit_GHz"], dtype=float) - nu0_GHz
-                fine = np.linspace(float(np.min(xf)), float(np.max(xf)), 300)
-                yf = isa.voigt(fine + (nu0_GHz - fit["nu_ref_GHz"]), *fit["popt"])
-                ax.plot(fine, yf, color=color, linewidth=1.8, linestyle="--")
-            ax.set_xlim(float(np.min(x)), float(np.max(x)))
-            ax.legend(fontsize=9, loc="upper right")
-            ax.grid(True, alpha=0.25)
-        # Broken-axis cosmetics: hide the facing spines and draw diagonal break marks.
-        ax_lo.spines["right"].set_visible(False)
-        ax_hi.spines["left"].set_visible(False)
-        ax_hi.tick_params(left=False)
-        ax_lo.set_ylabel("counts")
-        d = 0.012
-        kw = dict(transform=ax_lo.transAxes, color="#333333", clip_on=False, linewidth=1.0)
-        ax_lo.plot((1 - d, 1 + d), (-d, +d), **kw)
-        ax_lo.plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
-        kw["transform"] = ax_hi.transAxes
-        ax_hi.plot((-d, +d), (-d, +d), **kw)
-        ax_hi.plot((-d, +d), (1 - d, 1 + d), **kw)
-        fig.suptitle(
-            f"{label}: collinear / anti-collinear Doppler split "
-            f"(separation {sep_GHz:.4f} GHz)",
-            fontsize=13,
+                lab_lo = float(np.min(fit["x_fit_GHz"]))
+                lab_hi = float(np.max(fit["x_fit_GHz"]))
+                lab_fine = np.linspace(lab_lo, lab_hi, 400)
+                yf = isa.voigt(lab_fine - fit["nu_ref_GHz"], *fit["popt"])
+                xf = (lab_fine * factor - nu0_GHz) * 1000.0
+                ax.plot(xf, yf, color=color, linewidth=1.8, linestyle="--")
+        ax.axvline(0.0, color="#333333", linestyle=":", linewidth=1.0, label="rest frequency nu0")
+        ax.set_xlabel("frequency - rest frequency nu0 (MHz)")
+        ax.set_ylabel("counts")
+        ax.legend(fontsize=9, loc="upper right")
+        ax.grid(True, alpha=0.25)
+        if xs_all:
+            allx = np.concatenate(xs_all)
+            span = max(500.0, float(np.percentile(np.abs(allx), 99)))
+            ax.set_xlim(-1.1 * span, 1.1 * span)
+        ax.set_title(
+            f"{label}: atom rest frame  (nu0 = {nu0_GHz:.4f} GHz, beta = {beta:.3e}; "
+            f"lab Doppler split {sep_GHz:.4f} GHz)",
+            fontsize=12,
         )
-        fig.text(0.5, 0.01, "frequency - rest frequency nu0 (GHz)", ha="center")
         fig.savefig(path, dpi=200, bbox_inches="tight")
         plt.close(fig)
 
@@ -836,7 +831,7 @@ def compute_beam_energy_correction(
     plot_view, plot_error = "", ""
     try:
         plot_path = ENERGY_PLOT_DIR / f"energy_{safe_plot_label(label)}.png"
-        _plot_energy_fits(label, col, anti, nu0, plot_path)
+        _plot_energy_fits(label, col, anti, nu0, beta, plot_path)
         plot_view = plot_url(str(plot_path))
     except Exception as exc:  # the numbers must survive a plotting failure
         plot_error = str(exc)
