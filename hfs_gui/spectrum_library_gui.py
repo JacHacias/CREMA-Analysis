@@ -44,6 +44,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import isotope_shift_analysis as isa
+import rate_spectrum as rate_fit
 from quick_isotope_shift import (
     DEFAULT_ANALYSIS_OPTIONS,
     FIT_BACKEND,
@@ -472,17 +473,24 @@ def compute_global_energy_average() -> dict:
 def beam_energy_systematic(comparison: str) -> dict | None:
     """Correlated beam-energy systematic on the isotope shift, d(IS)/dV * sigma_V,
     from the collinear/anti-collinear energy library, with shared-scan rows collapsed
-    so correlated pairs do not shrink the scatter SEM."""
+    so correlated pairs do not shrink the scatter SEM.
+
+    sigma_V is the scatter SEM of the calibration OFFSET (inferred - set voltage): the
+    analysis applies that offset to the per-bunch DMM voltage, so a real change of the
+    set voltage between calibration days is not a calibration error (the scatter of
+    the absolute inferred voltages, used before 2026-09-29, mixes it in)."""
     rows = read_energy_library()
     clusters = [c for c in _cluster_energy_rows(rows)
-                if _cluster_mean(c, "voltage_inferred_V") is not None]
+                if _cluster_mean(c, "voltage_inferred_V") is not None and _cluster_mean(c, "delta_V") is not None]
     if not clusters:
         return None
     voltages = [_cluster_mean(c, "voltage_inferred_V") for c in clusters]
+    offsets = [_cluster_mean(c, "delta_V") for c in clusters]
     nu0s = [_float_or_none(r.get("rest_frequency_GHz")) for c in clusters for r in c]
     nu0s = [n for n in nu0s if n is not None]
     n_rows = sum(1 for r in rows if _float_or_none(r.get("voltage_inferred_V")) is not None)
-    vmean, sigma_v, n_clusters = _mean_scatter_sem(voltages)
+    vmean, _sigma_abs, n_clusters = _mean_scatter_sem(voltages)
+    _offset_mean, sigma_v, _ = _mean_scatter_sem(offsets)
     nu0_mean = sum(nu0s) / len(nu0s) if nu0s else 757000.0
     info = {"V": vmean, "sigma_V": sigma_v, "n_clusters": n_clusters,
             "n_rows": n_rows, "d_is_dv_MHz_per_V": None, "beam_sys_MHz": 0.0}
@@ -817,6 +825,134 @@ def _plot_energy_fits(label: str, col: dict, anti: dict, ctx: dict, path: Path) 
         plt.close(fig)
 
 
+def _v2_rest_center(path: Path, label: str, options: dict, geometry: str, offset_V: float) -> dict:
+    """v2 fit of one calibration scan in its own Doppler-corrected frame at a trial offset."""
+    opts = dict(options, geometry=geometry, voltage_offset_V=offset_V, validate_isotope_wavenumber=False)
+    gates = {k: tuple(v) for k, v in (opts.get("per_isotope_tof_gates") or {}).items() if v is not None}
+    spec, _ = _prepare_cut_file_for_label(label, [path], options=opts, per_isotope_tof_gates=gates)
+    mass_u = float(SULFUR_MASSES_U[label])
+    result = rate_fit.apply_bootstrap(rate_fit.fit_rate_spectrum(spec, mass_u, opts), spec, mass_u, opts)
+    inputs = rate_fit._fit_inputs(spec, mass_u, opts, nu_ref=result["nu_ref_GHz"] * 1000.0)
+    set_V = float(np.average(spec.voltage_V, weights=spec.bunches))
+    factor = float(isa.doppler_correct_ghz(1.0, mass_u, set_V + offset_V, int(opts.get("charge_e", 1)), geometry,
+                                           neutralization=opts.get("neutralization", "none")))
+    return {"center_MHz": result["center_abs_GHz"] * 1000.0, "center_unc_MHz": result["center_fit_unc_GHz"] * 1000.0,
+            "slope_MHz_per_V": inputs["slope_MHz_per_V"], "set_V": set_V, "factor": factor,
+            "n_points": spec.num_points, "result": result}
+
+
+def compute_beam_energy_correction_v2(
+    collinear_files: list[str],
+    anti_files: list[str],
+    label: str,
+    options: dict,
+    data_dir: str | Path,
+) -> dict:
+    """Collinear / anti-collinear beam energy with the v2 line shape, in the rest frame.
+
+    Each scan is fitted in its own Doppler-corrected frame (per-bunch DMM voltage plus a
+    trial offset delta0), with the analysis line shape (energy-loss tail included when
+    tail_model is set, its side following the geometry). The offset that makes the two
+    rest-frame centers agree is delta0 + (c_col - c_anti) / (s_col + s_anti), s the
+    Doppler slopes (MHz/V); several scans of one geometry are fitted separately and
+    averaged. Using the same line shape here and in the isotope-shift fits keeps the beam
+    energy consistent with the centroid definition (with an energy-loss tail the no-loss
+    core sits several volts above the symmetric-fit energy).
+    """
+    if label not in SULFUR_MASSES_U:
+        raise ValueError(f"Unknown isotope '{label}'. Use one of {sorted(SULFUR_MASSES_U)}.")
+    mass_u = float(SULFUR_MASSES_U[label])
+    charge = int(options.get("charge_e", 1))
+    neutralization = str(options.get("neutralization", "none"))
+    delta0 = float(options.get("voltage_offset_V", 0.0) or 0.0)
+    cols = [_v2_rest_center(p, label, options, "collinear", delta0) for p in _resolve_gui_files(collinear_files, data_dir)]
+    antis = [_v2_rest_center(p, label, options, "anticollinear", delta0) for p in _resolve_gui_files(anti_files, data_dir)]
+    if not cols or not antis:
+        raise ValueError("Provide at least one collinear and one anti-collinear file.")
+
+    def mean(fits, key):
+        return float(np.mean([f[key] for f in fits]))
+
+    def mean_unc(fits):
+        return math.sqrt(sum(f["center_unc_MHz"] ** 2 for f in fits)) / len(fits)
+
+    c_col, c_anti = mean(cols, "center_MHz"), mean(antis, "center_MHz")
+    s_col, s_anti = mean(cols, "slope_MHz_per_V"), mean(antis, "slope_MHz_per_V")
+    delta = delta0 + (c_col - c_anti) / (s_col + s_anti)
+    delta_unc = math.hypot(mean_unc(cols), mean_unc(antis)) / (s_col + s_anti)
+    v_set = float(np.median([f["set_V"] for f in cols + antis]))
+    v_inferred = v_set + delta
+    nu0 = 0.5 * ((c_col - s_col * (delta - delta0)) + (c_anti + s_anti * (delta - delta0))) / 1000.0
+
+    def beta_model(voltage: float) -> float:
+        return float(isa.beam_beta_after_cec(
+            mass_u, beam_voltage_V=voltage, charge_e=charge, neutralization=neutralization,
+            sodium_mass_u=options.get("sodium_mass_u", isa.SODIUM_MASS_U),
+            sodium_collision_branch=options.get("sodium_collision_branch", "forward"),
+        ))
+
+    beta = beta_model(v_inferred)
+    step = max(1.0, 1e-4 * v_inferred)
+    beta_unc = abs(beta_model(v_inferred + step) - beta_model(v_inferred - step)) / (2.0 * step) * delta_unc
+    gamma = 1.0 / math.sqrt(1.0 - beta ** 2)
+    m_probed_u = mass_u - charge * isa.ELECTRON_MASS_U if neutralization.lower() in ("none", "ion", "charged") else mass_u
+    m_probed = m_probed_u * isa.AMU
+    ke_probed_eV = (gamma - 1.0) * m_probed * isa.C ** 2 / isa.E_CHARGE
+    ke_probed_unc_eV = abs(m_probed * isa.C ** 2 * gamma ** 3 * beta * beta_unc) / isa.E_CHARGE
+    # lab-frame centroids implied by the fitted rest-frame centers
+    nu_c_lab = mean([dict(f, lab=f["center_MHz"] / f["factor"]) for f in cols], "lab") / 1000.0
+    nu_a_lab = mean([dict(f, lab=f["center_MHz"] / f["factor"]) for f in antis], "lab") / 1000.0
+
+    plot_view, plot_error = "", ""
+    try:
+        ENERGY_PLOT_DIR.mkdir(parents=True, exist_ok=True)
+        plot_path = ENERGY_PLOT_DIR / f"energy_{safe_plot_label(label)}_v2.png"
+        fig, axes = plt.subplots(2, 1, figsize=(11, 8), sharex=True)
+        for ax, fits, geom, color in ((axes[0], cols, "collinear", "C0"), (axes[1], antis, "anticollinear", "C1")):
+            for k, f in enumerate(fits):
+                rate_fit.plot_rate_fit(ax, f["result"], reference_GHz=f["result"]["nu_ref_GHz"],
+                                       label=f"{geom} {k + 1}", color=color if k == 0 else f"C{k + 2}")
+        axes[1].set_xlabel("frequency relative to each scan's reference (MHz), trial offset %.2f V" % delta0)
+        fig.suptitle(f"{label}: v2 beam energy, offset {delta:.2f} +/- {delta_unc:.2f} V "
+                     f"(tail model {options.get('tail_model', 'none')})")
+        fig.tight_layout()
+        fig.savefig(plot_path, dpi=120)
+        plt.close(fig)
+        plot_view = plot_url(str(plot_path))
+    except Exception as exc:  # the numbers must survive a plotting failure
+        plot_error = str(exc)
+        plt.close("all")
+
+    return {
+        "isotope": label,
+        "neutralization": neutralization,
+        "method": "v2 rest frame",
+        "tail_model": str(options.get("tail_model", "none")),
+        "collinear": {"center_GHz": nu_c_lab, "center_unc_MHz": mean_unc(cols) / cols[0]["factor"],
+                      "n_points": sum(f["n_points"] for f in cols), "voltage_V": mean(cols, "set_V"),
+                      "rest_center_MHz": c_col, "slope_MHz_per_V": s_col},
+        "anticollinear": {"center_GHz": nu_a_lab, "center_unc_MHz": mean_unc(antis) / antis[0]["factor"],
+                          "n_points": sum(f["n_points"] for f in antis), "voltage_V": mean(antis, "set_V"),
+                          "rest_center_MHz": c_anti, "slope_MHz_per_V": s_anti},
+        "rest_frequency_GHz": nu0,
+        "rest_frequency_unc_MHz": 0.5 * math.hypot(mean_unc(cols), mean_unc(antis)),
+        "beta": beta,
+        "beta_unc": beta_unc,
+        "gamma": gamma,
+        "velocity_m_s": beta * isa.C,
+        "ke_probed_eV": ke_probed_eV,
+        "ke_probed_unc_eV": ke_probed_unc_eV,
+        "ke_ion_eV": charge * v_inferred,
+        "voltage_inferred_V": v_inferred,
+        "voltage_inferred_unc_V": delta_unc,
+        "voltage_set_V": v_set,
+        "delta_V": delta,
+        "trial_offset_V": delta0,
+        "plot_url": plot_view,
+        "plot_error": plot_error,
+    }
+
+
 def compute_beam_energy_correction(
     collinear_files: list[str],
     anti_files: list[str],
@@ -828,8 +964,13 @@ def compute_beam_energy_correction(
 
     nu0 = sqrt(nu_c * nu_a) is the rest frequency independent of beam energy, and the
     ratio gives beta -> kinetic energy. (collinear factor gamma*(1-beta),
-    anti-collinear gamma*(1+beta).)
+    anti-collinear gamma*(1+beta).) Analysis v2 options use the rest-frame v2 method
+    (compute_beam_energy_correction_v2) so the offset matches the isotope-shift line shape.
     """
+    if rate_fit.is_v2(options):
+        return compute_beam_energy_correction_v2(collinear_files, anti_files, label, options, data_dir)
+    # The recorded ("set") voltage is the DMM read-back without any offset.
+    options = dict(options, voltage_offset_V=0.0)
     if label not in SULFUR_MASSES_U:
         raise ValueError(f"Unknown isotope '{label}'. Use one of {sorted(SULFUR_MASSES_U)}.")
     mass_u = float(SULFUR_MASSES_U[label])
@@ -1607,7 +1748,22 @@ def options_from_payload(payload: dict) -> dict:
         options["bin_width_MHz"] = float(payload["bin_width_MHz"])
     if str(payload.get("beam_voltage_unc_V", "")).strip():
         options["beam_voltage_unc_V"] = float(payload["beam_voltage_unc_V"])
+    if str(payload.get("voltage_offset_V", "")).strip():
+        options["voltage_offset_V"] = float(payload["voltage_offset_V"])
     options["auto_remove_bad_scans"] = bool(payload.get("auto_remove_bad_scans"))
+    if "analysis_model" in payload:  # the v2 controls are on the form
+        options["analysis_model"] = "v2" if payload.get("analysis_model") == "v2" else "legacy"
+        for key in ("exposure_normalization", "remove_echo_counts", "deadtime_correction", "fit_ripple_amplitude"):
+            options[key] = bool(payload.get(key))
+        for key in ("ripple_amplitude_V", "laser_linewidth_fwhm_MHz"):
+            if str(payload.get(key, "")).strip():
+                options[key] = float(payload[key])
+        if payload.get("laser_lineshape") in ("gaussian", "lorentzian"):
+            options["laser_lineshape"] = payload["laser_lineshape"]
+        if payload.get("tail_model") in ("none", "exponential"):
+            options["tail_model"] = payload["tail_model"]
+        if payload.get("shape_transfer") in ("none", "tail", "tail+sigma"):
+            options["shape_transfer"] = payload["shape_transfer"]
     return options
 
 
@@ -1936,6 +2092,56 @@ def render_page() -> bytes:
             <input id="hv-unc" name="beam_voltage_unc_V" value="{default_options['beam_voltage_unc_V']}">
           </div>
         </div>
+
+        <label for="voltage-offset">Beam-energy offset V (collinear/anti-collinear)</label>
+        <input id="voltage-offset" name="voltage_offset_V" value="{default_options.get('voltage_offset_V', 0.0)}">
+        <div class="help">Added to the DMM beam voltage. The library rows use +184.54 V; leaving 0 shifts 34S-32S by about -170 MHz.</div>
+
+        <label for="analysis-model">Analysis model</label>
+        <select id="analysis-model" name="analysis_model">
+          <option value="v2"{' selected' if default_options.get('analysis_model') == 'v2' else ''}>v2: exposure-normalized Poisson fit with counting and lineshape corrections</option>
+          <option value="legacy"{' selected' if default_options.get('analysis_model') != 'v2' else ''}>legacy: Voigt on raw binned counts (rows before 2026-09-28)</option>
+        </select>
+        <label><input type="checkbox" name="exposure_normalization"{' checked' if default_options.get('exposure_normalization', True) else ''} style="width:auto"> Fit ions per bunch against bunch exposure</label>
+        <label><input type="checkbox" name="remove_echo_counts"{' checked' if default_options.get('remove_echo_counts', True) else ''} style="width:auto"> Remove MagneTOF echo counts (70.5 ns and weaker)</label>
+        <label><input type="checkbox" name="deadtime_correction"{' checked' if default_options.get('deadtime_correction', True) else ''} style="width:auto"> Dead-time live-time correction</label>
+        <div class="grid3">
+          <div>
+            <label for="ripple-amp">60 Hz ripple amplitude V</label>
+            <input id="ripple-amp" name="ripple_amplitude_V" value="{default_options.get('ripple_amplitude_V', 4.5)}">
+          </div>
+          <div>
+            <label for="laser-fwhm">Laser FWHM MHz</label>
+            <input id="laser-fwhm" name="laser_linewidth_fwhm_MHz" value="{default_options.get('laser_linewidth_fwhm_MHz', 21.213)}">
+          </div>
+          <div>
+            <label for="laser-shape">Laser profile</label>
+            <select id="laser-shape" name="laser_lineshape">
+              <option value="gaussian"{' selected' if default_options.get('laser_lineshape', 'gaussian') == 'gaussian' else ''}>Gaussian</option>
+              <option value="lorentzian"{' selected' if default_options.get('laser_lineshape') == 'lorentzian' else ''}>Lorentzian</option>
+            </select>
+          </div>
+        </div>
+        <label><input type="checkbox" name="fit_ripple_amplitude"{' checked' if default_options.get('fit_ripple_amplitude') else ''} style="width:auto"> Fit the ripple amplitude (diagnostic)</label>
+        <div class="grid2">
+          <div>
+            <label for="tail-model">Energy-loss tail</label>
+            <select id="tail-model" name="tail_model">
+              <option value="none"{' selected' if default_options.get('tail_model', 'none') == 'none' else ''}>none (symmetric profile)</option>
+              <option value="exponential"{' selected' if default_options.get('tail_model') == 'exponential' else ''}>exponential low-energy tail</option>
+            </select>
+          </div>
+          <div>
+            <label for="shape-transfer">Shape transfer 32S &rarr; 34S</label>
+            <select id="shape-transfer" name="shape_transfer">
+              <option value="none"{' selected' if default_options.get('shape_transfer', 'none') == 'none' else ''}>none (each isotope free)</option>
+              <option value="tail"{' selected' if default_options.get('shape_transfer') == 'tail' else ''}>tail (fraction, length in V)</option>
+              <option value="tail+sigma"{' selected' if default_options.get('shape_transfer') == 'tail+sigma' else ''}>tail + Gaussian width</option>
+            </select>
+          </div>
+        </div>
+        <div class="help">Tail: a fraction of the atoms carries an extra exponential energy loss (lower frequency collinear, higher anticollinear); "center" is then the no-loss core. Use it with shape transfer (the 34S fit takes the 32S tail, pair bootstrap for the shift error) and a beam-energy calibration from the same model.</div>
+        <div class="help">v2 only. Ripple: bunches (50 Hz) sample the 60 Hz ripple at random phase, an arcsine kernel of half-width ~139 MHz for 32S. Laser: 15 MHz seeded Ti:sapphire, doubled = 15&radic;2 MHz.</div>
 
         <div class="grid2">
           <div>
@@ -2402,7 +2608,18 @@ def render_page() -> bytes:
         tof_gate_34S: document.getElementById('tof-gate-34').value,
         tof_gate_36S: document.getElementById('tof-gate-36').value,
         bin_width_MHz: document.getElementById('bin-width').value,
-        beam_voltage_unc_V: document.getElementById('hv-unc').value
+        beam_voltage_unc_V: document.getElementById('hv-unc').value,
+        voltage_offset_V: document.getElementById('voltage-offset').value,
+        analysis_model: document.getElementById('analysis-model').value,
+        exposure_normalization: form.elements.exposure_normalization.checked ? 'on' : '',
+        remove_echo_counts: form.elements.remove_echo_counts.checked ? 'on' : '',
+        deadtime_correction: form.elements.deadtime_correction.checked ? 'on' : '',
+        fit_ripple_amplitude: form.elements.fit_ripple_amplitude.checked ? 'on' : '',
+        ripple_amplitude_V: document.getElementById('ripple-amp').value,
+        laser_linewidth_fwhm_MHz: document.getElementById('laser-fwhm').value,
+        laser_lineshape: document.getElementById('laser-shape').value,
+        tail_model: document.getElementById('tail-model').value,
+        shape_transfer: document.getElementById('shape-transfer').value
       }};
       try {{
         setStatus('Rebuilding from the selected data folder...', '');
@@ -2812,7 +3029,8 @@ class SpectrumLibraryHandler(BaseHTTPRequestHandler):
                 self.send_json({"deleted": len(target), "library": summary})
                 return
 
-            require_satlas_backend()
+            if not rate_fit.is_v2(options_from_payload(payload)):
+                require_satlas_backend()  # v2 fits do not use satlas2
             if parsed.path == "/api/rebuild":
                 options = options_from_payload(payload)
                 with MUTATION_LOCK:

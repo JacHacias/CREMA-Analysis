@@ -17,6 +17,7 @@
   "tof_col": "tof",
   "beam_voltage_V": 10000.0,
   "beam_voltage_unc_V": 0.0,
+  "voltage_offset_V": 190.7726576475665,
   "voltage_col": "voltage",
   "voltage_multiplier": 5962.49,
   "use_voltage_column": true,
@@ -36,5 +37,29 @@
     "32S": [12625.16, 12625.22],
     "34S": [12624.86, 12624.93],
     "36S": [12624.48, 12624.72]
-  }
+  },
+  "analysis_model": "v2",
+  "remove_echo_counts": true,
+  "echo_windows_ns": [
+    [60.0, 61.5],
+    [68.0, 72.0],
+    [122.0, 124.0],
+    [129.0, 133.0],
+    [140.0, 144.0]
+  ],
+  "deadtime_correction": true,
+  "exposure_normalization": true,
+  "ripple_amplitude_V": 4.5,
+  "fit_ripple_amplitude": false,
+  "laser_linewidth_fwhm_MHz": 21.213,
+  "laser_lineshape": "gaussian",
+  "lorentzian_hwhm_MHz": null,
+  "group_cell_MHz": 10.0,
+  "bootstrap_replicas": 200,
+  "bootstrap_block_bins": 0,
+  "bootstrap_seed": 20260928,
+  "tail_model": "exponential",
+  "shape_transfer": "tail",
+  "fit_background_slope": true,
+  "wavemeter_glitch_tol_cm": 0.01
 }

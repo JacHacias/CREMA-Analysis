@@ -1,0 +1,26 @@
+{
+ "global": {
+  "available": true,
+  "n_rows": 5,
+  "n_clusters": 3,
+  "voltage_global_V": 10108.819860927395,
+  "voltage_global_unc_V": 0.7208840380410365,
+  "beta_global": 0.0008239358542279411,
+  "beta_global_unc": 2.937821364907862e-08,
+  "rest_frequency_GHz": 756363.3354358883,
+  "rest_frequency_unc_MHz": 13.577017458653318,
+  "ke_ion_eV": 10108.819860927395,
+  "ke_ion_unc_eV": 0.7208840380410365,
+  "voltage_set_V": 9918.047203279828,
+  "delta_V": 190.7726576475665,
+  "delta_V_unc_V": 0.8278871792646822
+ },
+ "systematic": {
+  "V": 10108.819860927395,
+  "sigma_V": 0.7208840380410365,
+  "n_clusters": 3,
+  "n_rows": 5,
+  "d_is_dv_MHz_per_V": 0.9192694289638884,
+  "beam_sys_MHz": 0.6626866579991656
+ }
+}

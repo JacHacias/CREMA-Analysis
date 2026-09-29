@@ -1,0 +1,41 @@
+{
+ "v2+tail": {
+  "34S-32S": {
+   "N": 7,
+   "weighted_mean_MHz": 580.3307665071484,
+   "scatter_sem_MHz": 4.941540432032208,
+   "internal_unc_MHz": 4.1138238613405305,
+   "weighted_std_MHz": 9.689319980682843,
+   "chi2_red": 0.6840971421159375,
+   "included": [
+    "2026-03-23 sulfur_2026-03-23",
+    "2026-03-24 sulfur_2026-03-24",
+    "2026-03-27 sulfur_2026-03-27",
+    "2026-05-08 sulfur_2026_05_08_run1 pair 1",
+    "2026-05-08 sulfur_2026_05_08_run1 pair 2",
+    "2026-05-08 sulfur_2026_05_08_run1 pair 5",
+    "2026-05-12 36S_2026_05_11 pair 1",
+    "2026-06-01 sulfur_20260601_bracketed bracket 1",
+    "2026-06-01 sulfur_20260601"
+   ],
+   "excluded": [
+    "2026-03-23 sulfur_2026-03-23_background: background run",
+    "2026-05-05 sulfur_2026-05-05_boundary_32S_34S: boundary run; counting uncertainty 18.9 > 15.0 MHz; peak/model 2.29 > 2.00",
+    "2026-05-06 sulfur_2026_05_06_run1_boundary_32S_34S: boundary run",
+    "2026-05-13 sulfur_20260513 pair 1: manually excluded: pull outlier: -4.6 sigma in the legacy analysis (rejected there by the 4-sigma cut), -3.9 sigma in v2; excluded by decis"
+   ]
+  },
+  "36S-32S": {
+   "N": 0,
+   "weighted_mean_MHz": null,
+   "scatter_sem_MHz": null,
+   "internal_unc_MHz": null,
+   "weighted_std_MHz": null,
+   "chi2_red": null,
+   "included": [],
+   "excluded": [
+    "2026-05-11 36S_2026_05_11 pair 1: manually excluded: 36s fit not robust: ~150 in-gate ions; the fitted position depends on the line-shape model by hundreds of mhz (legacy 11; counting uncertainty 18.2 > 15.0 MHz"
+   ]
+  }
+ }
+}

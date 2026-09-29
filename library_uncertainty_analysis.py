@@ -16,6 +16,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+# A row whose notes contain this marker is left out of every average, with the
+# rest of the note as the recorded reason (a decision, not an automatic cut).
+MANUAL_EXCLUDE_MARKER = "[excluded]"
+
+
 @dataclass
 class InclusionCuts:
     comparison: str = "34S-32S"
@@ -202,7 +207,8 @@ def _iter_peak_to_model_values(fit_quality: Any) -> list[float]:
         item = stack.pop()
         if isinstance(item, dict):
             for key, value in item.items():
-                if key == "peak_to_model":
+                # The fitters write peak_to_model_max; the bare key never matched.
+                if key in ("peak_to_model", "peak_to_model_max"):
                     found = safe_float(value)
                     if math.isfinite(found):
                         values.append(found)
@@ -213,6 +219,36 @@ def _iter_peak_to_model_values(fit_quality: Any) -> list[float]:
     return values
 
 
+def counting_shift_unc(row: dict[str, Any]) -> float:
+    """Counting (Fisher) error of a row's shift, when its fits carry a bootstrap.
+
+    Bootstrap rows store the per-isotope Fisher errors in fit_quality; the
+    fit-uncertainty cut tests these, so it keeps selecting on how well each
+    spectrum is constrained while the bootstrap error sets the weights.
+    Returns NaN for rows without them (the cut then uses the stored error).
+    """
+    try:
+        quality = json.loads(row.get("bad_scan_filter", "") or "{}").get("fit_quality", {})
+    except (json.JSONDecodeError, AttributeError):
+        return math.nan
+    if not isinstance(quality, dict):
+        return math.nan
+    # Tail-model fits store the symmetric-stage (counting) error separately: the cut
+    # judges the data, not how well the tail decomposition is constrained.
+    fisher = {k: safe_float(v.get("counting_center_unc_MHz", v.get("fisher_center_unc_MHz"))) for k, v in quality.items()
+              if isinstance(v, dict) and "fisher_center_unc_MHz" in v}
+    if len(fisher) < 2 or not all(math.isfinite(v) for v in fisher.values()):
+        return math.nan
+    bracket = quality.get("bracket")
+    if isinstance(bracket, dict) and "32S_before" in fisher and "32S_after" in fisher:
+        f = safe_float(bracket.get("fraction"), 0.5)
+        other = [v for k, v in fisher.items() if k not in ("32S_before", "32S_after")]
+        if len(other) != 1:
+            return math.nan
+        return math.sqrt(other[0] ** 2 + ((1 - f) * fisher["32S_before"]) ** 2 + (f * fisher["32S_after"]) ** 2)
+    return math.sqrt(sum(v * v for v in fisher.values()))
+
+
 def _bracket_reason(row: dict[str, Any]) -> str | None:
     raw = row.get("options_json", "")
     try:
@@ -220,6 +256,13 @@ def _bracket_reason(row: dict[str, Any]) -> str | None:
     except json.JSONDecodeError:
         options = {}
     bracket = options.get("bracketed_32S_reference") or options.get("bracketed_reference")
+    if not isinstance(bracket, dict):
+        # run_bracketed_block_analyses stores the check under fit_quality.bracket.
+        try:
+            quality = json.loads(row.get("bad_scan_filter", "") or "{}").get("fit_quality", {})
+        except (json.JSONDecodeError, AttributeError):
+            quality = {}
+        bracket = quality.get("bracket") if isinstance(quality, dict) else None
     if not isinstance(bracket, dict):
         return None
     passes = bracket.get("passes")
@@ -263,6 +306,9 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
             reasons.append("background run")
         if cuts.exclude_boundary and "boundary" in run_text:
             reasons.append("boundary run")
+        notes = str(row.get("notes", "") or "")
+        if MANUAL_EXCLUDE_MARKER in notes.lower():
+            reasons.append("manually excluded: " + notes.lower().split(MANUAL_EXCLUDE_MARKER, 1)[1].strip()[:120])
         shift = safe_float(row.get("isotope_shift_MHz"))
         fit_unc = safe_float(row.get("isotope_shift_fit_unc_MHz"))
         total_unc = safe_float(row.get("isotope_shift_total_unc_MHz"))
@@ -272,8 +318,11 @@ def analyze_library_uncertainty(rows: list[dict[str, Any]], cuts: InclusionCuts)
             reasons.append("missing fit uncertainty")
         if not math.isfinite(total_unc) or total_unc <= 0:
             reasons.append("missing total uncertainty")
-        if cuts.fit_unc_cut_MHz is not None and math.isfinite(fit_unc) and fit_unc > cuts.fit_unc_cut_MHz:
-            reasons.append(f"fit uncertainty {fit_unc:.1f} > {cuts.fit_unc_cut_MHz:.1f} MHz")
+        counting = counting_shift_unc(row)
+        cut_unc = counting if math.isfinite(counting) else fit_unc
+        if cuts.fit_unc_cut_MHz is not None and math.isfinite(cut_unc) and cut_unc > cuts.fit_unc_cut_MHz:
+            label = "counting uncertainty" if math.isfinite(counting) else "fit uncertainty"
+            reasons.append(f"{label} {cut_unc:.1f} > {cuts.fit_unc_cut_MHz:.1f} MHz")
         if cuts.total_unc_cut_MHz is not None and math.isfinite(total_unc) and total_unc > cuts.total_unc_cut_MHz:
             reasons.append(f"total uncertainty {total_unc:.1f} > {cuts.total_unc_cut_MHz:.1f} MHz")
         n_ref = safe_int(row.get("num_points_reference"))

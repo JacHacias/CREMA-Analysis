@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import re
 from datetime import datetime
@@ -25,12 +26,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import numpy.lib.recfunctions as rfn
+import pandas as pd
 
+import counting_corrections
 import isotope_shift_analysis as two_fit
+import rate_spectrum as rate_fit
 import three_isotope_shift_analysis as three_fit
 
 plt.show = lambda *args, **kwargs: None
 FIT_BACKEND = "satlas2" if two_fit.satlas2 is not None else "scipy_curve_fit"
+V2_FIT_BACKEND = "poisson_ml_v2"
 GHZ_TO_MHZ = 1000.0
 
 
@@ -74,6 +80,10 @@ DEFAULT_ANALYSIS_OPTIONS: dict[str, Any] = {
         "34S": [12624.86, 12624.93],
         "36S": [12624.48, 12624.72]
     },
+    # Analysis v2 (rate_spectrum): echo removal, dead-time live correction,
+    # exposure-normalized Poisson fit, 60 Hz ripple kernel, 15*sqrt(2) MHz laser.
+    # Rows saved before v2 have no analysis_model key and replay as "legacy".
+    **rate_fit.V2_DEFAULTS,
 }
 
 LIBRARY_COLUMNS = [
@@ -438,6 +448,7 @@ def _fit_options_for_run(options: dict[str, Any], per_isotope_tof_gates: dict[st
         "bracket_max_shift_disagreement_MHz",
         "validate_isotope_wavenumber",
         "isotope_wavenumber_windows",
+        *rate_fit.V2_OPTION_KEYS,
     ):
         fit_options.pop(key, None)
     if per_isotope_tof_gates:
@@ -446,23 +457,69 @@ def _fit_options_for_run(options: dict[str, Any], per_isotope_tof_gates: dict[st
     return fit_options
 
 
+def _bad_scan_kwargs(options: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "scan_bin_col": "scan_bin_index",
+        "wn_col": options.get("wn_col", "wavemeter_wn1"),
+        "min_coverage_fraction": options.get("bad_scan_min_coverage_fraction", 0.60),
+        "min_points_fraction": options.get("bad_scan_min_points_fraction", 0.35),
+        "max_spectrum_peak_z": options.get("bad_scan_max_spectrum_peak_z", 6.0),
+    }
+
+
+def _prepare_rate_spectrum_for_label(
+    label: str,
+    paths: list[Path],
+    *,
+    options: dict[str, Any],
+    per_isotope_tof_gates: dict[str, tuple[float, float]],
+) -> tuple[rate_fit.RateSpectrum, dict[str, Any]]:
+    """Analysis v2: keep every row for exposure, tag echoes, drop bad scan passes."""
+    frame = rate_fit.load_scan_frame(paths, rate_fit.echo_windows(options))
+    if options.get("auto_remove_bad_scans", True):
+        # Same pass selection as the legacy path: the filter sees every row.
+        records, summary = remove_bad_scans(frame.to_records(index=False), **_bad_scan_kwargs(options))
+        frame = pd.DataFrame.from_records(records)
+    else:
+        summary = {"enabled": False, "reason": "disabled", "scans_total": 0, "scans_removed": 0, "points_removed": 0}
+    gate = per_isotope_tof_gates.get(label) or options.get("tof_gate_us")
+    spectrum = rate_fit.build_rate_spectrum(frame, label, gate, options)
+    summary["v2_counting"] = {
+        key: spectrum.diagnostics[key]
+        for key in ("echo_fraction", "echo_hits_removed", "min_live_fraction", "deadtime_count_correction",
+                    "peak_dwell_rate_per_bunch", "bunches", "dwells")
+    }
+    return spectrum, summary
+
+
+def _load_with_echo_flag(paths: list[Path], options: dict[str, Any]) -> np.ndarray:
+    """Legacy arrays plus an is_echo field (echoes tagged per file, before any cut)."""
+    windows = rate_fit.echo_windows(options) or counting_corrections.ECHO_WINDOWS_NS
+    arrays = []
+    for path in paths:
+        dat = load_cut_file(path)
+        hits = (np.asarray(dat["channel"]) == 2) & (np.asarray(dat["tof"], dtype=float) > 0)
+        echo = np.zeros(dat.size, dtype=bool)
+        echo[hits] = counting_corrections.tag_echo_hits(dat["bunch_id"][hits], dat["tof"][hits], windows)
+        arrays.append(rfn.append_fields(dat, "is_echo", echo, usemask=False))
+    return arrays[0] if len(arrays) == 1 else np.concatenate(arrays)
+
+
 def _prepare_cut_file_for_label(
     label: str,
     paths: list[Path],
     *,
     options: dict[str, Any],
     per_isotope_tof_gates: dict[str, tuple[float, float]],
-) -> tuple[np.ndarray, dict[str, Any]]:
-    dat = concatenate_cut_files(paths)
-    if options.get("auto_remove_bad_scans", True):
-        dat, summary = remove_bad_scans(
-            dat,
-            scan_bin_col="scan_bin_index",
-            wn_col=options.get("wn_col", "wavemeter_wn1"),
-            min_coverage_fraction=options.get("bad_scan_min_coverage_fraction", 0.60),
-            min_points_fraction=options.get("bad_scan_min_points_fraction", 0.35),
-            max_spectrum_peak_z=options.get("bad_scan_max_spectrum_peak_z", 6.0),
+) -> tuple[np.ndarray | rate_fit.RateSpectrum, dict[str, Any]]:
+    if rate_fit.is_v2(options):
+        return _prepare_rate_spectrum_for_label(
+            label, paths, options=options, per_isotope_tof_gates=per_isotope_tof_gates
         )
+    remove_echoes = bool(options.get("remove_echo_counts"))
+    dat = _load_with_echo_flag(paths, options) if remove_echoes else concatenate_cut_files(paths)
+    if options.get("auto_remove_bad_scans", True):
+        dat, summary = remove_bad_scans(dat, **_bad_scan_kwargs(options))
     else:
         summary = {
             "enabled": False,
@@ -471,6 +528,9 @@ def _prepare_cut_file_for_label(
             "scans_removed": 0,
             "points_removed": 0,
         }
+    if remove_echoes:
+        summary["echo_hits_removed"] = int(np.count_nonzero(dat["is_echo"]))
+        dat = dat[~dat["is_echo"]]
     if label in per_isotope_tof_gates:
         dat = two_fit.apply_tof_gate(
             dat,
@@ -510,11 +570,16 @@ def _rest_frequencies_for_label(dat: np.ndarray, label: str, options: dict[str, 
 
 
 def _fit_absolute_center(
-    dat: np.ndarray,
+    dat: np.ndarray | rate_fit.RateSpectrum,
     label: str,
     options: dict[str, Any],
     voltage_offset_V: float | None = None,
 ) -> dict[str, Any]:
+    if isinstance(dat, rate_fit.RateSpectrum):
+        result = rate_fit.fit_rate_spectrum(dat, SULFUR_MASSES_U[label], options, voltage_offset_V=voltage_offset_V)
+        if voltage_offset_V is None:  # the HV-perturbed refits only need the center
+            result = rate_fit.apply_bootstrap(result, dat, SULFUR_MASSES_U[label], options)
+        return result
     nu_ref = float(np.median(_rest_frequencies_for_label(dat, label, options)))
     offset = options.get("voltage_offset_V", 0.0) if voltage_offset_V is None else voltage_offset_V
     center, dcenter, x, counts, centers, fit_params, x_fit_window, quality = two_fit._fit_center_from_voltage(
@@ -574,6 +639,10 @@ def _plot_bracketed_fit(
     ]
     x_limits = []
     for ax, result, label, color in plot_rows:
+        if result.get("analysis_model") == "v2":
+            rate_fit.plot_rate_fit(ax, result, reference_GHz=reference_interp_GHz, label=label, color=color)
+            ax.axvline(0.0, color="black", linestyle=":", label="interpolated 32S")
+            continue
         centers_MHz = (result["centers_GHz"] + result["nu_ref_GHz"] - reference_interp_GHz) * GHZ_TO_MHZ
         xfit = np.linspace(result["centers_GHz"].min(), result["centers_GHz"].max(), 2000)
         xfit_MHz = (xfit + result["nu_ref_GHz"] - reference_interp_GHz) * GHZ_TO_MHZ
@@ -608,6 +677,81 @@ def _plot_bracketed_fit(
         fontweight="bold",
     )
     plt.tight_layout()
+
+
+def _two_isotope_fit(
+    prepared_1: np.ndarray | rate_fit.RateSpectrum,
+    prepared_2: np.ndarray | rate_fit.RateSpectrum,
+    *,
+    label1: str,
+    label2: str,
+    options: dict[str, Any],
+    fit_options: dict[str, Any],
+) -> dict[str, Any]:
+    """Legacy plot_two_isotopes_fit, or the v2 rate fit for RateSpectrum inputs."""
+    if isinstance(prepared_1, rate_fit.RateSpectrum):
+        return rate_fit.two_isotope_rate_fit(
+            prepared_1,
+            prepared_2,
+            mass1_u=SULFUR_MASSES_U[label1],
+            mass2_u=SULFUR_MASSES_U[label2],
+            label1=label1,
+            label2=label2,
+            options=options,
+        )
+    return two_fit.plot_two_isotopes_fit(
+        cut_file_1=prepared_1,
+        cut_file_2=prepared_2,
+        mass1_u=SULFUR_MASSES_U[label1],
+        mass2_u=SULFUR_MASSES_U[label2],
+        label1=label1,
+        label2=label2,
+        **fit_options,
+    )
+
+
+def _three_isotope_rate_fit(prepared: dict[str, rate_fit.RateSpectrum], options: dict[str, Any]) -> dict[str, Any]:
+    """v2 counterpart of three_fit.plot_three_isotopes_fit (result keys for _three_isotope_row)."""
+    fits = {"32S": _fit_absolute_center(prepared["32S"], "32S", options)}
+    shaped = rate_fit.transferred_shape_options(options, [fits["32S"]])
+    for label, spec in prepared.items():
+        if label != "32S":
+            fits[label] = _fit_absolute_center(spec, label, shaped)
+    fits = {label: fits[label] for label in prepared}
+    nu0 = float(np.mean([fit["nu_ref_GHz"] for fit in fits.values()]))
+    unc_V = float(options.get("beam_voltage_unc_V", 0.0) or 0.0)
+    offset = float(options.get("voltage_offset_V", 0.0))
+    shifted = {}
+    if unc_V > 0:
+        for sign in (1.0, -1.0):
+            shifted[sign] = {
+                label: _fit_absolute_center(spec, label, options if label == "32S" else shaped,
+                                            voltage_offset_V=offset + sign * unc_V)["center_abs_GHz"]
+                for label, spec in prepared.items()
+            }
+    fig, axes = plt.subplots(len(fits), 1, figsize=(14, 4 * len(fits)), sharex=True)
+    result: dict[str, Any] = {"analysis_model": "v2", "nu0_GHz": nu0}
+    for ax, (label, fit) in zip(np.atleast_1d(axes), fits.items()):
+        rate_fit.plot_rate_fit(ax, fit, reference_GHz=nu0, label=label, color={"32S": "C0", "34S": "C1"}.get(label, "C2"))
+        voltage_unc = abs(shifted[1.0][label] - shifted[-1.0][label]) / 2.0 if shifted else 0.0
+        result[label] = {
+            "center": fit["center_abs_GHz"] - nu0,
+            "center_fit_unc": fit["center_fit_unc_GHz"],
+            "center_voltage_unc": voltage_unc,
+            "center_total_unc": float(np.hypot(fit["center_fit_unc_GHz"], voltage_unc)),
+            "fit_quality": fit["fit_quality"],
+        }
+        result[f"num_points_{label}"] = fit["num_points"]
+    plt.tight_layout()
+    for heavy in ("34S", "36S"):
+        key = f"shift_{heavy[:2]}_32"
+        result[f"{key}_GHz"] = fits[heavy]["center_abs_GHz"] - fits["32S"]["center_abs_GHz"]
+        fit_unc = float(np.hypot(fits[heavy]["center_fit_unc_GHz"], fits["32S"]["center_fit_unc_GHz"]))
+        voltage_unc = 0.0
+        if shifted:
+            voltage_unc = abs((shifted[1.0][heavy] - shifted[1.0]["32S"]) - (shifted[-1.0][heavy] - shifted[-1.0]["32S"])) / 2.0
+        result[f"{key}_total_unc_GHz"] = float(np.hypot(fit_unc, voltage_unc))
+    return result
 
 
 def _comparison_label(label1: str, label2: str) -> str:
@@ -751,14 +895,8 @@ def run_analysis(
     fit_options = _fit_options_for_run(options, per_isotope_tof_gates)
 
     if labels == ["32S", "34S"]:
-        result = two_fit.plot_two_isotopes_fit(
-            cut_file_1=cut_files["32S"],
-            cut_file_2=cut_files["34S"],
-            mass1_u=SULFUR_MASSES_U["32S"],
-            mass2_u=SULFUR_MASSES_U["34S"],
-            label1="32S",
-            label2="34S",
-            **fit_options,
+        result = _two_isotope_fit(
+            cut_files["32S"], cut_files["34S"], label1="32S", label2="34S", options=options, fit_options=fit_options
         )
         plot_files = _save_open_figures(Path(plot_dir), analysis_id)
         rows = [
@@ -779,15 +917,18 @@ def run_analysis(
             )
         ]
     else:
-        result = three_fit.plot_three_isotopes_fit(
-            cut_file_32S=cut_files["32S"],
-            cut_file_34S=cut_files["34S"],
-            cut_file_36S=cut_files["36S"],
-            mass32_u=SULFUR_MASSES_U["32S"],
-            mass34_u=SULFUR_MASSES_U["34S"],
-            mass36_u=SULFUR_MASSES_U["36S"],
-            **fit_options,
-        )
+        if rate_fit.is_v2(options):
+            result = _three_isotope_rate_fit(cut_files, options)
+        else:
+            result = three_fit.plot_three_isotopes_fit(
+                cut_file_32S=cut_files["32S"],
+                cut_file_34S=cut_files["34S"],
+                cut_file_36S=cut_files["36S"],
+                mass32_u=SULFUR_MASSES_U["32S"],
+                mass34_u=SULFUR_MASSES_U["34S"],
+                mass36_u=SULFUR_MASSES_U["36S"],
+                **fit_options,
+            )
         plot_files = _save_open_figures(Path(plot_dir), analysis_id)
         rows = [
             _three_isotope_row(
@@ -888,14 +1029,8 @@ def run_adjacent_block_analyses(
                 options=options,
                 per_isotope_tof_gates=per_isotope_tof_gates,
             )
-            result = two_fit.plot_two_isotopes_fit(
-                cut_file_1=dat_left,
-                cut_file_2=dat_right,
-                mass1_u=SULFUR_MASSES_U[label_left],
-                mass2_u=SULFUR_MASSES_U[label_right],
-                label1=label_left,
-                label2=label_right,
-                **fit_options,
+            result = _two_isotope_fit(
+                dat_left, dat_right, label1=label_left, label2=label_right, options=options, fit_options=fit_options
             )
         except Exception as exc:
             plt.close("all")
@@ -981,19 +1116,25 @@ def run_bracketed_block_analyses(
                 options=options,
                 per_isotope_tof_gates=per_isotope_tof_gates,
             )
+            t_before = _file_time_key(before["files"][0])
+            t_comparison = _file_time_key(block["files"][0])
+            t_after = _file_time_key(after["files"][0])
+            fraction = (t_comparison - t_before) / max(t_after - t_before, 1.0)
+            fraction = min(max(fraction, 0.0), 1.0)
             result_before = _fit_absolute_center(dat_before, "32S", options)
-            result_comparison = _fit_absolute_center(dat_comparison, label, options)
             result_after = _fit_absolute_center(dat_after, "32S", options)
+            # v2 shape transfer: the comparison isotope takes the bracketing 32S
+            # line shape (energy-loss tail, optionally width), time-interpolated.
+            options_comparison = options
+            if rate_fit.is_v2(options):
+                options_comparison = rate_fit.transferred_shape_options(
+                    options, [result_before, result_after], [1.0 - fraction, fraction]
+                )
+            result_comparison = _fit_absolute_center(dat_comparison, label, options_comparison)
         except Exception as exc:
             plt.close("all")
             print(f"Skipping bracketed {label}-32S pair: {exc}")
             continue
-
-        t_before = _file_time_key(before["files"][0])
-        t_comparison = _file_time_key(block["files"][0])
-        t_after = _file_time_key(after["files"][0])
-        fraction = (t_comparison - t_before) / max(t_after - t_before, 1.0)
-        fraction = min(max(fraction, 0.0), 1.0)
         reference_center = (
             (1.0 - fraction) * result_before["center_abs_GHz"]
             + fraction * result_after["center_abs_GHz"]
@@ -1009,6 +1150,19 @@ def run_bracketed_block_analyses(
         shift_after = result_comparison["center_abs_GHz"] - result_after["center_abs_GHz"]
         shift_disagreement_MHz = abs(shift_before - shift_after) * GHZ_TO_MHZ
         fit_unc = float(np.sqrt(result_comparison["center_fit_unc_GHz"] ** 2 + reference_unc ** 2))
+        pair_quality = None
+        if rate_fit.is_v2(options) and rate_fit.shape_transfer_mode(options) != "none":
+            # Shared tail: resample all three scans together so its uncertainty cancels.
+            pair_quality = rate_fit.pair_bootstrap_shift(
+                [(dat_before, SULFUR_MASSES_U["32S"], result_before), (dat_after, SULFUR_MASSES_U["32S"], result_after)],
+                (dat_comparison, SULFUR_MASSES_U[label], result_comparison),
+                options,
+                weights=[1.0 - fraction, fraction],
+            )
+            if pair_quality and "shift_unc_MHz" in pair_quality:
+                fisher = [rate_fit.counting_unc_MHz(r) for r in (result_before, result_comparison, result_after)]
+                floor = math.sqrt(((1.0 - fraction) * fisher[0]) ** 2 + fisher[1] ** 2 + (fraction * fisher[2]) ** 2)
+                fit_unc = max(pair_quality["shift_unc_MHz"], floor) / GHZ_TO_MHZ
         nu0 = 0.5 * (reference_center + result_comparison["center_abs_GHz"])
 
         # Beam-voltage (HV) uncertainty on the bracketed shift. Perturb the common
@@ -1024,7 +1178,7 @@ def run_bracketed_block_analyses(
 
             def _bracket_shift_at(offset: float) -> float:
                 rb = _fit_absolute_center(dat_before, "32S", options, voltage_offset_V=offset)
-                rc = _fit_absolute_center(dat_comparison, label, options, voltage_offset_V=offset)
+                rc = _fit_absolute_center(dat_comparison, label, options_comparison, voltage_offset_V=offset)
                 ra = _fit_absolute_center(dat_after, "32S", options, voltage_offset_V=offset)
                 ref = (1.0 - fraction) * rb["center_abs_GHz"] + fraction * ra["center_abs_GHz"]
                 return rc["center_abs_GHz"] - ref
@@ -1093,6 +1247,7 @@ def run_bracketed_block_analyses(
                     "max_shift_disagreement_MHz": max_disagreement,
                     "passes": shift_disagreement_MHz <= max_disagreement,
                 },
+                **({"pair_bootstrap": pair_quality} if pair_quality else {}),
             },
         )
         rows.append(row)
@@ -1135,7 +1290,7 @@ def _shared_metadata(
         "isotopes": ";".join(sorted(isotope_file_groups, key=lambda label: int(label[:-1]))),
         "files": ";".join(str(path) for path in files),
         "plot_files": ";".join(plot_files),
-        "fit_backend": FIT_BACKEND,
+        "fit_backend": V2_FIT_BACKEND if rate_fit.is_v2(options) else FIT_BACKEND,
         "bad_scan_filter": json.dumps(filter_summaries, sort_keys=True),
         "scans_removed": scans_removed,
         "points_removed": points_removed,

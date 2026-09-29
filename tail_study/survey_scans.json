@@ -1,0 +1,1414 @@
+[
+ {
+  "label": "32S",
+  "file": "32S_3-23-26.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\32S_3-23-26.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 4.5,
+   "NRI": "532nm 1000V",
+   "ABL": 895,
+   "iris": 33.5
+  },
+  "start": "2026-03-23T19:00:36",
+  "duration_s": 923.92,
+  "t0": 1774306836.0,
+  "t1": 1774307759.92
+ },
+ {
+  "label": "34S",
+  "file": "34S_3-23-26.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\34S_3-23-26.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 4.5,
+   "NRI": "532nm 1000V",
+   "ABL": 895,
+   "iris": 33.5
+  },
+  "start": "2026-03-23T20:04:39",
+  "duration_s": 4018.98,
+  "t0": 1774310679.0,
+  "t1": 1774314697.98
+ },
+ {
+  "label": "32S",
+  "file": "32S_3-23-26_back.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\32S_3-23-26_back.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 4.5,
+   "NRI": "532nm 1000V",
+   "ABL": 895,
+   "iris": 33.5
+  },
+  "start": "2026-03-23T21:16:59",
+  "duration_s": 1085.02,
+  "t0": 1774315019.0,
+  "t1": 1774316104.02
+ },
+ {
+  "label": "34S",
+  "file": "34S_3-23-26_back.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\34S_3-23-26_back.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 4.5,
+   "NRI": "532nm 1000V",
+   "ABL": 895,
+   "iris": 33.5
+  },
+  "start": "2026-03-23T21:40:49",
+  "duration_s": 1901.78,
+  "t0": 1774316449.0,
+  "t1": 1774318350.78
+ },
+ {
+  "label": "32S",
+  "file": "32S_3-24-26.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\32S_3-24-26.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 16.5,
+   "NRI": "532nm 1050V",
+   "ABL": 895,
+   "iris": 34
+  },
+  "start": "2026-03-24T14:51:11",
+  "duration_s": 1452.26,
+  "t0": 1774378271.0,
+  "t1": 1774379723.26
+ },
+ {
+  "label": "34S",
+  "file": "34S_3-24-26.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\34S_3-24-26.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 16.5,
+   "NRI": "532nm 1050V",
+   "ABL": 895,
+   "iris": 34
+  },
+  "start": "2026-03-24T15:33:03",
+  "duration_s": 2099.32,
+  "t0": 1774380783.0,
+  "t1": 1774382882.32
+ },
+ {
+  "label": "32S",
+  "file": "32S_3-27-26.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\32S_3-27-26.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 16.5,
+   "NRI": "532nm 1100V",
+   "ABL": 895,
+   "iris": 32,
+   "chD_width_ms": 1.0
+  },
+  "start": "2026-03-27T14:24:16",
+  "duration_s": 1944.2,
+  "t0": 1774635856.0,
+  "t1": 1774637800.2
+ },
+ {
+  "label": "34S",
+  "file": "34S_3-27-26.csv",
+  "path": "C:\\Users\\EMALAB\\Documents\\Jackson\\Archived\\data\\S data for analysis\\34S_3-27-26.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 16.5,
+   "NRI": "532nm 1100V",
+   "ABL": 895,
+   "iris": 32,
+   "chD_width_ms": 1.0
+  },
+  "start": "2026-03-27T15:00:34",
+  "duration_s": 2370.42,
+  "t0": 1774638034.0,
+  "t1": 1774640404.42
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260505_194044.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260505_194044.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 840V",
+   "ABL": 897,
+   "iris": 32
+  },
+  "start": "2026-05-05T19:40:44",
+  "duration_s": 223.12,
+  "t0": 1778024444.0,
+  "t1": 1778024667.12
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260505_194747.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260505_194747.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 840V",
+   "ABL": 897,
+   "iris": 32
+  },
+  "start": "2026-05-05T19:47:47",
+  "duration_s": 243.38,
+  "t0": 1778024867.0,
+  "t1": 1778025110.38
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260506_152634.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260506_152634.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-06T15:26:34",
+  "duration_s": 426.92,
+  "t0": 1778095594.0,
+  "t1": 1778096020.92
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260506_154426.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260506_154426.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-06T15:44:26",
+  "duration_s": 451.96,
+  "t0": 1778096666.0,
+  "t1": 1778097117.96
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260508_131731.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260508_131731.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-08T13:17:31",
+  "duration_s": 1592.5,
+  "t0": 1778260651.0,
+  "t1": 1778262243.5
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260508_134603.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260508_134603.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-08T13:46:03",
+  "duration_s": 1015.7,
+  "t0": 1778262363.0,
+  "t1": 1778263378.7
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260508_140738.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260508_140738.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-08T14:07:38",
+  "duration_s": 1523.66,
+  "t0": 1778263658.0,
+  "t1": 1778265181.66
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260508_153504.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260508_153504.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-08T15:35:04",
+  "duration_s": 1066.06,
+  "t0": 1778268904.0,
+  "t1": 1778269970.06
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260508_155825.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260508_155825.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-08T15:58:25",
+  "duration_s": 1089.92,
+  "t0": 1778270305.0,
+  "t1": 1778271394.92
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260511_083642.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260511_083642.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 1.2,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32,
+   "polarizer": 150
+  },
+  "start": "2026-05-11T08:36:42",
+  "duration_s": 2122.3,
+  "t0": 1778503002.0,
+  "t1": 1778505124.3
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260512_144505.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260512_144505.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 1.25,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32,
+   "polarizer": 165
+  },
+  "start": "2026-05-12T14:45:05",
+  "duration_s": 1336.6,
+  "t0": 1778611505.0,
+  "t1": 1778612841.6
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260512_155458.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260512_155458.csv",
+  "gate": [
+   4.7,
+   5.4
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-12T15:54:58",
+  "duration_s": 2678.88,
+  "t0": 1778615698.0,
+  "t1": 1778618376.88
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260513_102135.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260513_102135.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 1.25,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32,
+   "polarizer": 165
+  },
+  "start": "2026-05-13T10:21:35",
+  "duration_s": 1300.96,
+  "t0": 1778682095.0,
+  "t1": 1778683395.96
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260513_110715.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260513_110715.csv",
+  "gate": [
+   4.7,
+   5.4
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": null,
+   "NRI": "1064nm 820V",
+   "ABL": 915,
+   "iris": 32
+  },
+  "start": "2026-05-13T11:07:15",
+  "duration_s": 2917.66,
+  "t0": 1778684835.0,
+  "t1": 1778687752.66
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260601_120201.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260601_120201.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 1.16,
+   "NRI": "1064nm 820V",
+   "ABL": 895,
+   "iris": 30
+  },
+  "start": "2026-06-01T12:02:01",
+  "duration_s": 2339.16,
+  "t0": 1780329721.0,
+  "t1": 1780332060.16
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260601_125135.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260601_125135.csv",
+  "gate": [
+   4.7,
+   5.4
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 2.3,
+   "NRI": "1064nm 820V",
+   "ABL": 895,
+   "iris": 30
+  },
+  "start": "2026-06-01T12:51:35",
+  "duration_s": 6102.08,
+  "t0": 1780332695.0,
+  "t1": 1780338797.08
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260601_144018.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260601_144018.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 1.2,
+   "NRI": "1064nm 820V",
+   "ABL": 895,
+   "iris": 30
+  },
+  "start": "2026-06-01T14:40:18",
+  "duration_s": 1917.4,
+  "t0": 1780339218.0,
+  "t1": 1780341135.4
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260601_151739.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260601_151739.csv",
+  "gate": [
+   4.8,
+   5.6
+  ],
+  "group": "library",
+  "cond": {
+   "RF": 5,
+   "P396": 2.3,
+   "NRI": "1064nm 820V",
+   "ABL": 895,
+   "iris": 30
+  },
+  "start": "2026-06-01T15:17:39",
+  "duration_s": 4766.72,
+  "t0": 1780341459.0,
+  "t1": 1780346225.72
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_152426.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_152426.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 10,
+   "iris": 32
+  },
+  "start": "2026-04-28T15:24:26",
+  "duration_s": 277.08,
+  "t0": 1777404266.0,
+  "t1": 1777404543.08
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_155635.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_155635.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 10,
+   "iris": 32
+  },
+  "start": "2026-04-28T15:56:35",
+  "duration_s": 530.5,
+  "t0": 1777406195.0,
+  "t1": 1777406725.5
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_160800.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_160800.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 10,
+   "iris": 32
+  },
+  "start": "2026-04-28T16:08:00",
+  "duration_s": 525.12,
+  "t0": 1777406880.0,
+  "t1": 1777407405.12
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260428_163342.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_163342.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 32
+  },
+  "start": "2026-04-28T16:33:42",
+  "duration_s": 722.12,
+  "t0": 1777408422.0,
+  "t1": 1777409144.12
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260428_170424.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_170424.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 20
+  },
+  "start": "2026-04-28T17:04:24",
+  "duration_s": 266.98,
+  "t0": 1777410264.0,
+  "t1": 1777410530.98
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_171621.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_171621.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 25
+  },
+  "start": "2026-04-28T17:16:21",
+  "duration_s": 374.62,
+  "t0": 1777410981.0,
+  "t1": 1777411355.62
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_172400.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_172400.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 32
+  },
+  "start": "2026-04-28T17:24:00",
+  "duration_s": 282.38,
+  "t0": 1777411440.0,
+  "t1": 1777411722.38
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_172922.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_172922.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-28T17:29:22",
+  "duration_s": 269.9,
+  "t0": 1777411762.0,
+  "t1": 1777412031.9
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_173503.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_173503.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 10,
+   "iris": 29
+  },
+  "start": "2026-04-28T17:35:03",
+  "duration_s": 274.52,
+  "t0": 1777412103.0,
+  "t1": 1777412377.52
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_174045.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_174045.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 10,
+   "iris": 29
+  },
+  "start": "2026-04-28T17:40:45",
+  "duration_s": 273.26,
+  "t0": 1777412445.0,
+  "t1": 1777412718.26
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_175915.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_175915.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-28T17:59:15",
+  "duration_s": 1030.5,
+  "t0": 1777413555.0,
+  "t1": 1777414585.5
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_181722.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_181722.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 11,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:17:22",
+  "duration_s": 303.36,
+  "t0": 1777414642.0,
+  "t1": 1777414945.36
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_182316.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_182316.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 13,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:23:16",
+  "duration_s": 273.58,
+  "t0": 1777414996.0,
+  "t1": 1777415269.58
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_182850.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_182850.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 14,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:28:50",
+  "duration_s": 275.76,
+  "t0": 1777415330.0,
+  "t1": 1777415605.76
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_183411.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_183411.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 15,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:34:11",
+  "duration_s": 277.12,
+  "t0": 1777415651.0,
+  "t1": 1777415928.12
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_183927.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_183927.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 16,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:39:27",
+  "duration_s": 270.32,
+  "t0": 1777415967.0,
+  "t1": 1777416237.32
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_184430.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_184430.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 16.5,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:44:30",
+  "duration_s": 272.68,
+  "t0": 1777416270.0,
+  "t1": 1777416542.68
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260428_184937.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260428_184937.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0428",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 17,
+   "iris": 29
+  },
+  "start": "2026-04-28T18:49:37",
+  "duration_s": 271.92,
+  "t0": 1777416577.0,
+  "t1": 1777416848.92
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_133305.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_133305.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 15,
+   "iris": 29
+  },
+  "start": "2026-04-29T13:33:05",
+  "duration_s": 1374.76,
+  "t0": 1777483985.0,
+  "t1": 1777485359.76
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260429_140210.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_140210.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-29T14:02:10",
+  "duration_s": 1589.32,
+  "t0": 1777485730.0,
+  "t1": 1777487319.32
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_144021.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_144021.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 15,
+   "iris": 29
+  },
+  "start": "2026-04-29T14:40:21",
+  "duration_s": 1532.6,
+  "t0": 1777488021.0,
+  "t1": 1777489553.6
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260429_151812.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_151812.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-29T15:18:12",
+  "duration_s": 1532.4,
+  "t0": 1777490292.0,
+  "t1": 1777491824.4
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_155145.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_155145.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 15,
+   "iris": 29
+  },
+  "start": "2026-04-29T15:51:45",
+  "duration_s": 789.02,
+  "t0": 1777492305.0,
+  "t1": 1777493094.02
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_161553.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_161553.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 15,
+   "iris": 29
+  },
+  "start": "2026-04-29T16:15:53",
+  "duration_s": 889.7,
+  "t0": 1777493753.0,
+  "t1": 1777494642.7
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_163445.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_163445.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 15,
+   "iris": 29
+  },
+  "start": "2026-04-29T16:34:45",
+  "duration_s": 1857.18,
+  "t0": 1777494885.0,
+  "t1": 1777496742.18
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260429_171205.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_171205.csv",
+  "gate": [
+   4.25,
+   5.5
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-29T17:12:05",
+  "duration_s": 914.4,
+  "t0": 1777497125.0,
+  "t1": 1777498039.4
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_181321.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_181321.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-29T18:13:21",
+  "duration_s": 313.28,
+  "t0": 1777500801.0,
+  "t1": 1777501114.28
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_182329.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_182329.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-29T18:23:29",
+  "duration_s": 1075.2,
+  "t0": 1777501409.0,
+  "t1": 1777502484.2
+ },
+ {
+  "label": "34S",
+  "file": "scan_20260429_184336.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260429_184336.csv",
+  "gate": [
+   5.1,
+   5.8
+  ],
+  "group": "rf_0429",
+  "cond": {
+   "P396": null,
+   "NRI": "532nm 1100V",
+   "ABL": 897,
+   "RF": 5,
+   "iris": 29
+  },
+  "start": "2026-04-29T18:43:36",
+  "duration_s": 452.06,
+  "t0": 1777502616.0,
+  "t1": 1777503068.06
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_120957.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_120957.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 7.2
+  },
+  "start": "2026-05-15T12:09:57",
+  "duration_s": 863.2,
+  "t0": 1778861397.0,
+  "t1": 1778862260.2
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_114136.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_114136.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 2.2
+  },
+  "start": "2026-05-15T11:41:36",
+  "duration_s": 911.68,
+  "t0": 1778859696.0,
+  "t1": 1778860607.68
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_133004.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_133004.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 1.2
+  },
+  "start": "2026-05-15T13:30:04",
+  "duration_s": 864.08,
+  "t0": 1778866204.0,
+  "t1": 1778867068.08
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_134807.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_134807.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 0.145
+  },
+  "start": "2026-05-15T13:48:07",
+  "duration_s": 869.34,
+  "t0": 1778867287.0,
+  "t1": 1778868156.34
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_140614.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_140614.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 0.095
+  },
+  "start": "2026-05-15T14:06:14",
+  "duration_s": 1256.52,
+  "t0": 1778868374.0,
+  "t1": 1778869630.52
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_143012.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_143012.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 0.035
+  },
+  "start": "2026-05-15T14:30:12",
+  "duration_s": 886.14,
+  "t0": 1778869812.0,
+  "t1": 1778870698.14
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_145139.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_145139.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 0.01
+  },
+  "start": "2026-05-15T14:51:39",
+  "duration_s": 876.28,
+  "t0": 1778871099.0,
+  "t1": 1778871975.28
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_151416.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_151416.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 6.7
+  },
+  "start": "2026-05-15T15:14:16",
+  "duration_s": 870.76,
+  "t0": 1778872456.0,
+  "t1": 1778873326.76
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_153202.csv",
+  "path": "C:\\Users\\EMALAB\\data\\scan_20260515_153202.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 7.1
+  },
+  "start": "2026-05-15T15:32:02",
+  "duration_s": 1005.9,
+  "t0": 1778873522.0,
+  "t1": 1778874527.9
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_162054.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260515_162054.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 5.5
+  },
+  "start": "2026-05-15T16:20:54",
+  "duration_s": 873.9,
+  "t0": 1778876454.0,
+  "t1": 1778877327.9
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_165934.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260515_165934.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 4.9
+  },
+  "start": "2026-05-15T16:59:34",
+  "duration_s": 896.86,
+  "t0": 1778878774.0,
+  "t1": 1778879670.86
+ },
+ {
+  "label": "32S",
+  "file": "scan_20260515_172054.csv",
+  "path": "C:\\Users\\EMALAB\\Desktop\\DBD_daq_emalab\\data\\scan_20260515_172054.csv",
+  "gate": [
+   4.25,
+   5.25
+  ],
+  "group": "power_0515",
+  "cond": {
+   "RF": 5,
+   "NRI": "1064nm 820V",
+   "ABL": 899,
+   "iris": 32,
+   "P396": 8.7
+  },
+  "start": "2026-05-15T17:20:54",
+  "duration_s": 871.78,
+  "t0": 1778880054.0,
+  "t1": 1778880925.78
+ }
+]
