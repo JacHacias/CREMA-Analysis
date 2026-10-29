@@ -35,8 +35,12 @@ fits from `per_pass_tail.json`. Observed scatter: about 12 MHz rms per pass (0.4
 
 * **Direct test:** scan 32S at two trap loads (accumulation time or source power) and look for a
   line shift of tens of MHz per factor 2 in load.
-* **Record a load monitor per bunch.** The DAQ keeps only hits in the 4-6 us ToF window. Record
-  all masses, or a pickoff after the RFQ, and log the RFQ DC/bias supplies and ablation
-  parameters into the scan files. That allows a correction or a gate on load.
+* **Save all ToF data, every run, for total beam rates.** The sulfur IS scans saved only hits in a
+  4-6 us card window, so they hold no record of the total beam (all masses) per bunch. That number
+  is exactly the load monitor this study lacked. Since 2026-10-01 the DAQ card window is 0-20 us
+  (`DBD_daq_emalab/src/devices/tagger.py`, `STOP_TIME_WINDOW`); keep it at full range for every
+  scan and apply ToF gates only in the analysis, never at acquisition. Also log the RFQ DC/bias
+  supplies and ablation parameters into the scan files (or add a pickoff after the RFQ). That
+  allows a correction or a gate on load.
 * **Reduce or stabilize the load:** run below the space-charge regime, cap the fill, use a steadier
   ablation spot, and use the QMF to remove contaminant ions from the trap.
