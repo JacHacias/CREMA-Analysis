@@ -40,3 +40,7 @@ Results (see `tail_study_summary.png`):
   +186.54(70) V, v2 tail core +190.77(83) V.
 * 34S-32S with each model's own offset, 200-replica pair bootstrap:
   symmetric 579.3(5.8)(0.6) MHz, tail + transfer 580.1(4.9)(0.8) MHz.
+
+Follow-ups (2026-10-28): `ERROR_BUDGET.md` (36S radius via muonic 34S-32S calibration, accumulation
+time from the library; `error_budget.py`) and `PASS_MOTION.md` (cause of the pass-to-pass line motion;
+`pass_motion.py`, `dwell_noise.py`, `flank_noise.py`).
